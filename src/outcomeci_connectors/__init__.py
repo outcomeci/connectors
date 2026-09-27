@@ -1,7 +1,8 @@
-"""Standalone connector implementations for OutcomeCI human-hook delivery.
+"""Standalone integration setup tooling for OutcomeCI.
 
-Each connector is a self-contained integration (e.g. Slack) that OutcomeCI's
-CLI/runtime (outcomeci-cli) depends on and calls into for a specific
-delivery mechanism, kept in its own repository so it can be reviewed and
-released independently of the core runtime.
+Each connector generates and installs a third-party app (e.g. Slack) and
+pushes its credential into an OutcomeCI Vault, kept in its own repository so
+it can be reviewed and released independently of the core runtime. Message
+delivery to that app happens through outcomeci-cli's own HTTP capability
+broker, not through this package.
 """
