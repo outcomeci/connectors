@@ -14,7 +14,7 @@ from outcomeci_connectors.slack import (
     status,
 )
 
-MINIMAL_WORKFLOW = """apiVersion: outcomeci.com/v1alpha1
+MINIMAL_WORKFLOW = """apiVersion: outcomeci.workflow/v1alpha1
 kind: OutcomeWorkflow
 metadata:
   name: default
