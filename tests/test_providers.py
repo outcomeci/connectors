@@ -6,6 +6,7 @@ import pytest
 
 from outcomeci_connectors.provider import (
     CONTRACT_VERSION,
+    Download,
     Grantable,
     Operation,
     Provider,
@@ -23,7 +24,7 @@ def test_built_in_providers_are_registered_as_entry_points():
 def test_slack_contract_carries_the_first_built_ins():
     contract = slack.PROVIDER.contract()
     assert contract["schema_version"] == CONTRACT_VERSION
-    assert sorted(contract["operations"]) == ["post", "reactions", "thread"]
+    assert sorted(contract["operations"]) == ["file", "post", "reactions", "thread"]
     post = contract["operations"]["post"]
     assert post["request"] == {
         "method": "POST",
@@ -44,6 +45,71 @@ def test_slack_contract_carries_the_first_built_ins():
     assert contract["watchers"]["reply"]["respond"] == "post"
     assert contract["watchers"]["reply"]["thread_field"] == "thread_ts"
     assert contract["watchers"]["reaction"]["respond"] == "post"
+    assert contract["watchers"]["reply"]["attachment"] == "file"
+
+
+def test_a_slack_file_is_read_only_where_it_is_shared_and_downloaded_from_slack():
+    file = slack.PROVIDER.contract()["operations"]["file"]
+
+    assert file["request"] == {
+        "method": "GET",
+        "path": "/api/files.info",
+        "query": {"file": "{{ input.file }}"},
+    }
+    assert file["grantable"] == {
+        "channel": {"response_in": ["body.file.channels", "body.file.groups", "body.file.ims"]}
+    }
+    assert file["response"]["download"] == {
+        "url": "body.file.url_private_download",
+        "hosts": ["files.slack.com"],
+        "name": "body.file.name",
+        "content_type": "body.file.mimetype",
+        "max_bytes": 20 * 1024 * 1024,
+    }
+    assert "url" not in " ".join(file["response"]["expose"].values())
+
+
+def test_a_grantable_argument_has_exactly_one_kind():
+    Grantable(response_in=("body.file.channels",))
+    with pytest.raises(ValueError):
+        Grantable()
+    with pytest.raises(ValueError):
+        Grantable(field="channel", response_in=("body.file.channels",))
+
+
+def test_only_a_fixed_operation_downloads():
+    download = Download(url="body.url", hosts=("files.example.com",), name="n", content_type="t")
+    with pytest.raises(ValueError):
+        Operation(description="x", methods=("GET",), download=download)
+    with pytest.raises(ValueError):
+        Download(url="body.url", hosts=(), name="n", content_type="t")
+
+
+def test_a_reply_can_be_files_alone():
+    output = {
+        "messages": [
+            {"ts": "1.0", "text": "plan", "bot_id": "B1"},
+            {
+                "ts": "2.0",
+                "text": "",
+                "user": "U1",
+                "subtype": "file_share",
+                "files": [
+                    {
+                        "id": "F1",
+                        "name": "shot.png",
+                        "mimetype": "image/png",
+                        "size": 10,
+                        "url_private": "https://files.slack.com/secret",
+                    }
+                ],
+            },
+        ]
+    }
+
+    (reply,) = slack.human_replies(output)
+
+    assert reply["files"] == [{"id": "F1", "name": "shot.png", "mimetype": "image/png", "size": 10}]
 
 
 def test_github_read_and_write_are_request_operations_scoped_by_repo():

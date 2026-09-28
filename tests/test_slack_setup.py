@@ -51,6 +51,7 @@ def test_scaffold_writes_a_manifest_for_the_webhook_trigger(tmp_path: Path) -> N
         "app_mentions:read",
         "channels:history",
         "chat:write",
+        "files:read",
         "groups:history",
         "im:history",
         "mpim:history",

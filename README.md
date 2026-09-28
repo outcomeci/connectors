@@ -14,10 +14,11 @@ with `uses:`, and the cli finds installed providers through the
 
 ```
 outcomeci_connectors/
-  provider.py          # Provider, Operation, Grantable, Deny, Watcher, Receiver
+  provider.py          # Provider, Operation, Grantable, Deny, Download, Watcher, Receiver
   providers/
     slack/
-      __init__.py      # PROVIDER: post, thread, reactions; reaction and reply watchers
+      __init__.py      # PROVIDER: post, thread, file, reactions; reaction and reply watchers
+      messages.py      # the files and subtypes a message carries
       receiver.py      # signed Events API requests to a workflow trigger
       setup.py         # app manifest, Slack CLI setup and status
     github.py          # PROVIDER: read and write, scoped by repo
@@ -29,7 +30,13 @@ Each provider package owns everything about its provider:
   request templates and response mapping.
 - **Grant vocabulary:** which arguments a grant may scope, such as a Slack
   `channel` or `thread_ts`, or a GitHub `repo`, and the requests an operation
-  refuses whatever the grant.
+  refuses whatever the grant. A grant pins an input field, bounds a request
+  path, or, for a resource whose request cannot name its scope, requires the
+  granted value in the response: a Slack file is readable only where it is
+  shared.
+- **Downloads:** the file a response points to, fetched with the same
+  credential from the hosts the provider names and saved for the agent to
+  open, such as a screenshot attached to a Slack message.
 - **Watchers:** the match logic behind `await` and `converse`, such as an
   emoji reaction or a human reply in a thread. The runtime owns the loop,
   timeouts and durability.

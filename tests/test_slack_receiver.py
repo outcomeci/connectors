@@ -76,6 +76,7 @@ def test_a_mention_becomes_the_trigger_keyed_by_its_message():
         "text": "hi",
         "ts": "1.1",
         "thread_ts": "1.1",
+        "files": [],
     }
 
 
@@ -145,3 +146,27 @@ def test_a_deposited_secret_with_a_trailing_newline_still_verifies():
     )
 
     assert reception.status == "respond"
+
+
+def test_a_triggers_files_are_listed_without_their_urls():
+    event = {
+        "type": "message",
+        "channel_type": "im",
+        "subtype": "file_share",
+        "text": "",
+        "files": [
+            {
+                "id": "F1",
+                "name": "shot.png",
+                "mimetype": "image/png",
+                "size": 10,
+                "url_private_download": "https://files.slack.com/secret",
+            }
+        ],
+    }
+
+    reception = receive(callback(**event))
+
+    assert reception.trigger["files"] == [
+        {"id": "F1", "name": "shot.png", "mimetype": "image/png", "size": 10}
+    ]
