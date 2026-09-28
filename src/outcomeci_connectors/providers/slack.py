@@ -7,6 +7,7 @@ from typing import Any
 from ..provider import Grantable, Operation, Provider, Watcher
 
 CHANNEL = Grantable(field="channel")
+THREAD = Grantable(field="thread_ts")
 
 
 def reaction_matches(output: dict[str, Any], emoji: str, *, by: str | None = None) -> bool:
@@ -72,7 +73,7 @@ PROVIDER = Provider(
                 "thread_ts": "body.message.thread_ts",
             },
             side_effect="create",
-            grantable={"channel": CHANNEL},
+            grantable={"channel": CHANNEL, "thread_ts": THREAD},
         ),
         "thread": Operation(
             description="Read a message's thread: the root message and every reply.",

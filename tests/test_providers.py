@@ -30,7 +30,10 @@ def test_slack_contract_carries_the_first_built_ins():
         "path": "/api/chat.postMessage",
         "body": "{{ input }}",
     }
-    assert post["grantable"] == {"channel": {"field": "channel"}}
+    assert post["grantable"] == {
+        "channel": {"field": "channel"},
+        "thread_ts": {"field": "thread_ts"},
+    }
     assert post["response"]["expose"] == {
         "channel": "body.channel",
         "ts": "body.ts",
