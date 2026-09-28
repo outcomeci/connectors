@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...provider import Grantable, Operation, Provider, Watcher
+from ...provider import Download, Grantable, Operation, Provider, Watcher
+from .messages import HUMAN_SUBTYPES, files
 from .receiver import RECEIVER
 
 CHANNEL = Grantable(field="channel")
 THREAD = Grantable(field="thread_ts")
+# A file is readable when it is shared in the granted conversation.
+SHARED_IN = Grantable(response_in=("body.file.channels", "body.file.groups", "body.file.ims"))
 
 
 def reaction_matches(output: dict[str, Any], emoji: str, *, by: str | None = None) -> bool:
@@ -23,25 +26,32 @@ def reaction_matches(output: dict[str, Any], emoji: str, *, by: str | None = Non
 
 def human_replies(
     output: dict[str, Any], *, after: str | None = None, by: str | None = None
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Human replies in a `thread` result, oldest first, skipping the root and bots.
 
     `after` is a message ts; only replies posted after it are returned, so a
     caller that remembers the last reply it read sees each reply once. `by`
-    keeps only one user's replies.
+    keeps only one user's replies. A reply is its text, its files, or both.
     """
     replies = []
     for item in (output.get("messages") or [])[1:]:
-        if not isinstance(item, dict) or item.get("bot_id") or item.get("subtype"):
+        if (
+            not isinstance(item, dict)
+            or item.get("bot_id")
+            or item.get("subtype") not in HUMAN_SUBTYPES
+        ):
             continue
-        text, ts = item.get("text"), item.get("ts")
-        if not isinstance(text, str) or not text.strip() or not isinstance(ts, str):
+        text, ts, attached = item.get("text"), item.get("ts"), files(item)
+        text = text if isinstance(text, str) else ""
+        if not isinstance(ts, str) or not (text.strip() or attached):
             continue
         if after is not None and float(ts) <= float(after):
             continue
         if by is not None and item.get("user") != by:
             continue
-        replies.append({"ts": ts, "text": text, "user": str(item.get("user") or "")})
+        replies.append(
+            {"ts": ts, "text": text, "user": str(item.get("user") or ""), "files": attached}
+        )
     return sorted(replies, key=lambda reply: float(reply["ts"]))
 
 
@@ -93,6 +103,36 @@ PROVIDER = Provider(
             expose={"messages": "body.messages"},
             grantable={"channel": CHANNEL},
         ),
+        "file": Operation(
+            description=(
+                "Open one file shared in the granted conversation, such as a screenshot "
+                "attached to a message: returns its name, type and size, and `file.path`, "
+                "a local copy to open. Messages list their files by id."
+            ),
+            method="GET",
+            path="/api/files.info",
+            input={
+                "type": "object",
+                "required": ["file"],
+                "properties": {"file": {"type": "string", "pattern": "^F[A-Z0-9]+$"}},
+                "additionalProperties": False,
+            },
+            query={"file": "{{ input.file }}"},
+            expose={
+                "name": "body.file.name",
+                "mimetype": "body.file.mimetype",
+                "size": "body.file.size",
+            },
+            grantable={"channel": SHARED_IN},
+            # Saved with the run's artifacts, which hold up to 2 MiB a file.
+            download=Download(
+                url="body.file.url_private_download",
+                hosts=("files.slack.com",),
+                name="body.file.name",
+                content_type="body.file.mimetype",
+                max_bytes=2 * 1024 * 1024,
+            ),
+        ),
         "reactions": Operation(
             description="Read the reactions on one message.",
             method="GET",
@@ -125,6 +165,7 @@ PROVIDER = Provider(
             description="Wait for human replies in one message's thread.",
             respond="post",
             thread_field="thread_ts",
+            attachment="file",
         ),
     },
     receiver=RECEIVER,

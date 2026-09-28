@@ -32,10 +32,11 @@ CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 PROJECT_RELATIVE = Path(".outcomeci/integrations/slack")
 
 # post: chat:write. thread: the history scope of each conversation type.
-# reactions: reactions:read.
+# file: files:read. reactions: reactions:read.
 OPERATION_SCOPES = (
     "channels:history",
     "chat:write",
+    "files:read",
     "groups:history",
     "im:history",
     "mpim:history",

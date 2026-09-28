@@ -23,10 +23,9 @@ from collections.abc import Collection, Mapping
 from typing import Any
 
 from ...provider import Receiver, Reception
+from .messages import HUMAN_SUBTYPES, files
 
 MAX_AGE_SECONDS = 300
-# Subtypes a person's own top-level message can carry.
-HUMAN_SUBTYPES = {None, "file_share"}
 
 EVENTS = {
     "mention": "A top-level message that @mentions the app, in a channel it is in.",
@@ -111,6 +110,7 @@ def receive(
             "text": text if isinstance(text, str) else "",
             "ts": ts,
             "thread_ts": ts,
+            "files": files(event),
         },
     )
 

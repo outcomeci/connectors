@@ -33,21 +33,60 @@ class Grantable:
     `field`: the call's input field must equal the granted value; the runtime
     fills it in when the agent leaves it out. `path_prefix`: a request path
     template, formatted with the granted value's fields, that the call's path
-    must equal or sit under, e.g. "/repos/{owner}/{name}".
+    must equal or sit under, e.g. "/repos/{owner}/{name}". `response_in`:
+    response paths of lists, one of which must contain the granted value, for
+    a resource whose request cannot name its scope, such as a file and the
+    conversations it is shared in. The runtime checks it before anything else
+    happens with the response, a download included.
     """
 
     field: str | None = None
     path_prefix: str | None = None
     value_fields: tuple[str, ...] = ()
+    response_in: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if (self.field is None) == (self.path_prefix is None):
-            raise ValueError("a grantable argument sets exactly one of field or path_prefix")
+        kinds = (self.field is not None, self.path_prefix is not None, bool(self.response_in))
+        if sum(kinds) != 1:
+            raise ValueError(
+                "a grantable argument sets exactly one of field, path_prefix or response_in"
+            )
 
     def contract(self) -> dict[str, Any]:
         if self.field is not None:
             return {"field": self.field}
+        if self.response_in:
+            return {"response_in": list(self.response_in)}
         return {"path_prefix": self.path_prefix, "value_fields": list(self.value_fields)}
+
+
+@dataclass(frozen=True)
+class Download:
+    """The file a response points to, fetched with the same credential and saved
+    where the agent can open it.
+
+    `url`, `name` and `content_type` are response paths. The runtime fetches
+    only an https URL on one of `hosts`, and at most `max_bytes`.
+    """
+
+    url: str
+    hosts: tuple[str, ...]
+    name: str
+    content_type: str
+    max_bytes: int = 20 * 1024 * 1024
+
+    def __post_init__(self) -> None:
+        if not self.hosts or self.max_bytes < 1:
+            raise ValueError("a download names at least one host and a positive size limit")
+
+    def contract(self) -> dict[str, Any]:
+        return {
+            "url": self.url,
+            "hosts": list(self.hosts),
+            "name": self.name,
+            "content_type": self.content_type,
+            "max_bytes": self.max_bytes,
+        }
 
 
 @dataclass(frozen=True)
@@ -91,9 +130,12 @@ class Operation:
     side_effect: str = "read"
     grantable: Mapping[str, Grantable] = field(default_factory=dict)
     deny: tuple[Deny, ...] = ()
+    download: Download | None = None
 
     def __post_init__(self) -> None:
         fixed = self.method is not None and self.path is not None
+        if self.download is not None and not fixed:
+            raise ValueError("only a fixed operation can download")
         if fixed == bool(self.methods):
             raise ValueError(
                 "an operation is either fixed (method and path) or a request (methods)"
@@ -115,7 +157,10 @@ class Operation:
             "description": self.description,
             "input": dict(self.input),
             "request": request,
-            "response": {"expose": dict(self.expose)},
+            "response": {
+                "expose": dict(self.expose),
+                **({"download": self.download.contract()} if self.download else {}),
+            },
             "side_effect": self.side_effect,
             "grantable": {name: item.contract() for name, item in self.grantable.items()},
             "deny": [item.contract() for item in self.deny],
@@ -129,7 +174,9 @@ class Watcher:
     The runtime owns the loop, timeouts and durability: it calls `operation`
     on the watched message and passes the result to `match`. A watcher that
     carries a conversation also names how to answer in it: the `respond`
-    operation, with the watched message's id in `thread_field`.
+    operation, with the watched message's id in `thread_field`. `attachment`
+    names the operation that fetches a file a reply carries: the runtime calls
+    it with `{"file": <id>}`, granted the watched message's `channel`.
     """
 
     operation: str
@@ -137,6 +184,7 @@ class Watcher:
     description: str = ""
     respond: str | None = None
     thread_field: str | None = None
+    attachment: str | None = None
 
 
 RECEPTIONS = {"reject", "respond", "ignore", "trigger"}
@@ -203,6 +251,11 @@ class Provider:
                 )
             if (watcher.respond is None) != (watcher.thread_field is None):
                 raise ValueError(f"watcher {name} sets both respond and thread_field, or neither")
+            if watcher.attachment is not None and watcher.attachment not in self.operations:
+                raise ValueError(
+                    f"watcher {name} fetches attachments with unknown operation "
+                    f"{watcher.attachment}"
+                )
 
     def contract(self) -> dict[str, Any]:
         return {
@@ -218,6 +271,7 @@ class Provider:
                     "description": watcher.description,
                     "respond": watcher.respond,
                     "thread_field": watcher.thread_field,
+                    "attachment": watcher.attachment,
                 }
                 for name, watcher in self.watchers.items()
             },
