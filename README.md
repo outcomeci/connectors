@@ -1,20 +1,44 @@
 # outcomeci/connectors
 
-Standalone setup tooling for [OutcomeCI](https://outcomeci.com) integrations,
-kept in its own repository so it can be reviewed, versioned, and released
-independently of the core runtime.
+The providers an [OutcomeCI](https://outcomeci.com) workflow can connect to,
+kept in their own repository so they can be reviewed, versioned and released
+independently of the runtime.
 
-## Connectors
+A provider is data plus pure functions. It never makes a request or holds a
+secret: the OutcomeCI runtime executes every call through its credential
+broker, which journals it. An `outcomeci.workflow/v1` workflow names a provider
+with `uses:`, and the cli finds installed providers through the
+`outcomeci.connectors` entry point group.
 
-- `outcomeci_connectors.slack` -- generates the Slack app manifest, drives the
-  Slack CLI to create and install the app locally, and reports setup status
-  (the `oci integration slack setup`/`manifest`/`status` command surface).
-  Message/reply delivery for `delivery.type: slack` human hooks is not
-  implemented here; that's handled by cli's `mode: reaction`/`mode: reply`,
-  resolved entirely through the generic HTTP capability broker rather than a
-  local Slack CLI dependency. `oci integration slack sync-credentials` (in
-  `outcomeci-cli`, not this package) pushes the installed app's bot token into
-  a vault for that broker to use.
+## Layout
+
+```
+outcomeci_connectors/
+  provider.py          # Provider, Operation, Grantable, Deny, Watcher
+  providers/
+    slack/
+      __init__.py      # PROVIDER: post, thread, reactions; reaction and reply watchers
+      setup.py         # app manifest, Slack CLI setup and status
+    github.py          # PROVIDER: read and write, scoped by repo
+```
+
+Each provider package owns everything about its provider:
+
+- **Operations:** what `uses: <provider>` resolves to, with input shapes,
+  request templates and response mapping.
+- **Grant vocabulary:** which arguments a grant may scope, such as a Slack
+  `channel` or `thread_ts`, or a GitHub `repo`, and the requests an operation
+  refuses whatever the grant.
+- **Watchers:** the match logic behind `await` and `converse`, such as an
+  emoji reaction or a human reply in a thread. The runtime owns the loop,
+  timeouts and durability.
+- **Setup:** for Slack, generating the app manifest and driving the Slack CLI
+  to create and install the app (the `oci integration slack setup`,
+  `manifest` and `status` commands).
+
+The runtime reads a provider through `Provider.contract()`, the versioned
+`outcomeci.connector/v1` document, and locks its digest into each workflow
+revision.
 
 ## Development
 
@@ -24,4 +48,4 @@ pytest
 ruff check .
 ```
 
-Versioned via git tags (`vX.Y.Z`), same convention as `outcomeci-cli`.
+Versioned via git tags (`vX.Y.Z`), the same convention as `outcomeci-cli`.
