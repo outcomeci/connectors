@@ -64,7 +64,7 @@ def test_a_slack_file_is_read_only_where_it_is_shared_and_downloaded_from_slack(
         "hosts": ["files.slack.com"],
         "name": "body.file.name",
         "content_type": "body.file.mimetype",
-        "max_bytes": 20 * 1024 * 1024,
+        "max_bytes": 2 * 1024 * 1024,
     }
     assert "url" not in " ".join(file["response"]["expose"].values())
 

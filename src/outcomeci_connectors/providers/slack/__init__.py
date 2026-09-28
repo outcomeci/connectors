@@ -124,11 +124,13 @@ PROVIDER = Provider(
                 "size": "body.file.size",
             },
             grantable={"channel": SHARED_IN},
+            # Saved with the run's artifacts, which hold up to 2 MiB a file.
             download=Download(
                 url="body.file.url_private_download",
                 hosts=("files.slack.com",),
                 name="body.file.name",
                 content_type="body.file.mimetype",
+                max_bytes=2 * 1024 * 1024,
             ),
         ),
         "reactions": Operation(
