@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from outcomeci_connectors.slack import (
+from outcomeci_connectors.providers.slack.setup import (
     SlackError,
     manifest,
     scaffold,
@@ -73,7 +73,9 @@ def test_scaffold_preserves_existing_manifest_without_force(tmp_path: Path) -> N
 def test_setup_logs_in_when_needed_and_installs_app(tmp_path: Path, monkeypatch) -> None:
     _init_workflow(tmp_path)
     fake = FakeSlack(initially_authorized=False)
-    monkeypatch.setattr("outcomeci_connectors.slack.shutil.which", lambda _: "/usr/local/bin/slack")
+    monkeypatch.setattr(
+        "outcomeci_connectors.providers.slack.setup.shutil.which", lambda _: "/usr/local/bin/slack"
+    )
     result = setup(tmp_path, name="Acme Outcomes", team="T0123456", channel="C0123456", runner=fake)
     commands = [command for command, _ in fake.commands]
     assert ["/usr/local/bin/slack", "login"] in commands
@@ -106,7 +108,9 @@ def test_setup_logs_in_when_needed_and_installs_app(tmp_path: Path, monkeypatch)
 def test_setup_skips_login_for_authorized_workspace(tmp_path: Path, monkeypatch) -> None:
     _init_workflow(tmp_path)
     fake = FakeSlack()
-    monkeypatch.setattr("outcomeci_connectors.slack.shutil.which", lambda _: "/usr/bin/slack")
+    monkeypatch.setattr(
+        "outcomeci_connectors.providers.slack.setup.shutil.which", lambda _: "/usr/bin/slack"
+    )
     setup(tmp_path, runner=fake)
     assert ["/usr/bin/slack", "login"] not in [command for command, _ in fake.commands]
 
@@ -118,7 +122,9 @@ def test_setup_targets_unambiguous_existing_app(tmp_path: Path, monkeypatch) -> 
     apps.parent.mkdir(parents=True, exist_ok=True)
     apps.write_text('{"T1":{"app_id":"A1","team_id":"T1"}}')
     fake = FakeSlack()
-    monkeypatch.setattr("outcomeci_connectors.slack.shutil.which", lambda _: "/usr/bin/slack")
+    monkeypatch.setattr(
+        "outcomeci_connectors.providers.slack.setup.shutil.which", lambda _: "/usr/bin/slack"
+    )
     setup(tmp_path, name="Acme", force=True, runner=fake)
     commands = [command for command, _ in fake.commands]
     assert ["/usr/bin/slack", "manifest", "validate", "--no-color", "--app", "A1"] in commands
@@ -128,7 +134,9 @@ def test_setup_targets_unambiguous_existing_app(tmp_path: Path, monkeypatch) -> 
 def test_setup_reauthenticates_an_expired_slack_session(tmp_path: Path, monkeypatch) -> None:
     _init_workflow(tmp_path)
     fake = FakeSlack(expired=True)
-    monkeypatch.setattr("outcomeci_connectors.slack.shutil.which", lambda _: "/usr/bin/slack")
+    monkeypatch.setattr(
+        "outcomeci_connectors.providers.slack.setup.shutil.which", lambda _: "/usr/bin/slack"
+    )
     setup(tmp_path, runner=fake)
     assert ["/usr/bin/slack", "login"] in [command for command, _ in fake.commands]
 
@@ -136,12 +144,14 @@ def test_setup_reauthenticates_an_expired_slack_session(tmp_path: Path, monkeypa
 def test_status_reports_ready_configuration(tmp_path: Path, monkeypatch) -> None:
     _init_workflow(tmp_path)
     scaffold(tmp_path, "OutcomeCI")
-    monkeypatch.setattr("outcomeci_connectors.slack.shutil.which", lambda _: "/usr/bin/slack")
+    monkeypatch.setattr(
+        "outcomeci_connectors.providers.slack.setup.shutil.which", lambda _: "/usr/bin/slack"
+    )
     assert status(tmp_path, runner=FakeSlack())["ready"] is True
 
 
 def test_setup_requires_slack_cli(tmp_path: Path, monkeypatch) -> None:
     _init_workflow(tmp_path)
-    monkeypatch.setattr("outcomeci_connectors.slack.shutil.which", lambda _: None)
+    monkeypatch.setattr("outcomeci_connectors.providers.slack.setup.shutil.which", lambda _: None)
     with pytest.raises(SlackError, match="Slack CLI is not installed"):
         setup(tmp_path)

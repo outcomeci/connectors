@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..provider import Grantable, Operation, Provider, Watcher
+from ...provider import Grantable, Operation, Provider, Watcher
 
 CHANNEL = Grantable(field="channel")
 THREAD = Grantable(field="thread_ts")
