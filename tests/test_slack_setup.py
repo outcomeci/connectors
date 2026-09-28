@@ -14,7 +14,7 @@ from outcomeci_connectors.providers.slack.setup import (
     status,
 )
 
-URL = "https://staging-api.outcomeci.com/v1/webhooks/route/token"
+URL = "https://example.com/v1/webhooks/route/token"
 
 
 class FakeSlack:
@@ -82,12 +82,15 @@ def test_scaffold_refuses_an_unusable_trigger(tmp_path: Path, request_url, event
         scaffold(tmp_path, "Acme", request_url=request_url, events=events)
 
 
-def test_scaffold_preserves_existing_manifest_without_force(tmp_path: Path) -> None:
-    project = scaffold(tmp_path, "First", request_url=URL)
+def test_setup_first_creates_the_app_then_subscribes_it(tmp_path: Path) -> None:
+    project = scaffold(tmp_path, "First")
+    assert "event_subscriptions" not in manifest(project)["settings"]
+
     scaffold(tmp_path, "Second", request_url=URL)
-    assert manifest(project)["display_information"]["name"] == "First"
-    scaffold(tmp_path, "Second", request_url=URL, force=True)
-    assert manifest(project)["display_information"]["name"] == "Second"
+
+    value = manifest(project)
+    assert value["display_information"]["name"] == "Second"
+    assert value["settings"]["event_subscriptions"]["request_url"] == URL
 
 
 def test_setup_logs_in_when_needed_and_installs_app(tmp_path: Path, monkeypatch) -> None:
@@ -116,7 +119,20 @@ def test_setup_logs_in_when_needed_and_installs_app(tmp_path: Path, monkeypatch)
         "T0123456",
     ] in commands
     assert result["configured"] is True
+    assert result["subscribed"] == URL
+    assert result["next"] == []
+
+
+def test_setup_without_a_request_url_says_what_comes_next(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "outcomeci_connectors.providers.slack.setup.shutil.which", lambda _: "/usr/bin/slack"
+    )
+
+    result = setup(tmp_path, runner=FakeSlack())
+
+    assert result["subscribed"] is None
     assert "Signing Secret" in result["next"][1]
+    assert "--request-url" in result["next"][2]
 
 
 def test_setup_skips_login_for_authorized_workspace(tmp_path: Path, monkeypatch) -> None:
@@ -137,7 +153,7 @@ def test_setup_targets_unambiguous_existing_app(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(
         "outcomeci_connectors.providers.slack.setup.shutil.which", lambda _: "/usr/bin/slack"
     )
-    setup(tmp_path, request_url=URL, name="Acme", force=True, runner=fake)
+    setup(tmp_path, request_url=URL, name="Acme", runner=fake)
     commands = [command for command, _ in fake.commands]
     assert ["/usr/bin/slack", "manifest", "validate", "--no-color", "--app", "A1"] in commands
     assert ["/usr/bin/slack", "app", "install", "--app", "A1"] in commands

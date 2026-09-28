@@ -5,10 +5,12 @@ is `v0=` plus the HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<body>`.
 A request older than five minutes is refused, so a captured one cannot be
 replayed later.
 
-Only top-level human messages start a run. A reply in a thread, including
-one that mentions the bot, belongs to the conversation that thread already
-carries (a workflow's `converse` step reads it), so it is ignored here, as are
-bot messages and edits.
+Only top-level human messages start a run, a message with files included. A
+reply in a thread, including one that mentions the bot, belongs to the
+conversation that thread already carries (a workflow's `converse` step reads
+it), so it is ignored here, as are bot messages, edits and deletions. A run is
+keyed by its message (team, channel and ts), so one message never starts two
+runs, even when Slack delivers it both as a mention and as a direct message.
 """
 
 from __future__ import annotations
@@ -16,12 +18,15 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 from collections.abc import Collection, Mapping
 from typing import Any
 
 from ...provider import Receiver, Reception
 
 MAX_AGE_SECONDS = 300
+# Subtypes a person's own top-level message can carry.
+HUMAN_SUBTYPES = {None, "file_share"}
 
 EVENTS = {
     "mention": "A top-level message that @mentions the app, in a channel it is in.",
@@ -59,13 +64,13 @@ def receive(
 ) -> Reception:
     timestamp = headers.get("x-slack-request-timestamp", "")
     sent = headers.get("x-slack-signature", "")
-    try:
-        age = abs(now - int(timestamp))
-    except ValueError:
+    if not re.fullmatch(r"[0-9]{1,12}", timestamp):
         return Reception("reject", "missing or malformed Slack request timestamp")
-    if age > MAX_AGE_SECONDS:
-        return Reception("reject", "Slack request timestamp is too old")
-    if not secret or not hmac.compare_digest(sent, signature(secret, timestamp, body)):
+    if abs(now - int(timestamp)) > MAX_AGE_SECONDS:
+        return Reception("reject", "Slack request timestamp is outside five minutes")
+    secret = secret.strip()
+    expected = signature(secret, timestamp, body).encode()
+    if not secret or not hmac.compare_digest(sent.encode("utf-8", "replace"), expected):
         return Reception("reject", "Slack signature does not match")
     try:
         payload = json.loads(body)
@@ -83,8 +88,8 @@ def receive(
         return Reception("ignore", "not an event callback")
     if not isinstance(event_id, str) or not event_id:
         return Reception("ignore", "event callback without an event_id")
-    if event.get("bot_id") or event.get("subtype"):
-        return Reception("ignore", "bot message or message change")
+    if event.get("bot_id") or event.get("subtype") not in HUMAN_SUBTYPES:
+        return Reception("ignore", "bot message, edit or deletion")
     kind = _kind(event)
     if kind is None or kind not in events:
         return Reception("ignore", "event the workflow does not listen for")
@@ -97,7 +102,7 @@ def receive(
     return Reception(
         "trigger",
         kind,
-        event_id=event_id,
+        event_id=f"{payload.get('team_id') or ''}:{channel}:{ts}",
         trigger={
             "event": kind,
             "team": str(payload.get("team_id") or ""),

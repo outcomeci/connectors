@@ -45,8 +45,8 @@ def test_url_verification_echoes_the_challenge():
 
 @pytest.mark.parametrize(
     "signing",
-    [{"secret": "someone-else"}, {"sent_at": NOW - 301}],
-    ids=["wrong secret", "replayed"],
+    [{"secret": "someone-else"}, {"sent_at": NOW - 301}, {"sent_at": NOW + 301}],
+    ids=["wrong secret", "replayed", "from the future"],
 )
 def test_unsigned_or_stale_requests_are_rejected(signing):
     assert receive({"type": "url_verification"}, **signing).status == "reject"
@@ -63,11 +63,11 @@ def test_a_tampered_body_is_rejected():
     assert reception.status == "reject"
 
 
-def test_a_mention_becomes_the_trigger_keyed_by_event_id():
+def test_a_mention_becomes_the_trigger_keyed_by_its_message():
     reception = receive(callback(type="app_mention"))
 
     assert reception.status == "trigger"
-    assert reception.event_id == "Ev1"
+    assert reception.event_id == "T1:C1:1.1"
     assert reception.trigger == {
         "event": "mention",
         "team": "T1",
@@ -95,6 +95,11 @@ def test_a_direct_message_is_a_dm():
         ({"type": "message", "channel_type": "im"}, ("mention",)),
         ({"type": "app_mention", "thread_ts": "0.9"}, ("mention",)),
         ({"type": "message", "channel_type": "im", "thread_ts": "0.9"}, ("dm",)),
+        (
+            {"type": "message", "channel_type": "im", "subtype": "thread_broadcast"},
+            ("dm",),
+        ),
+        ({"type": "message", "channel_type": "im", "subtype": "message_deleted"}, ("dm",)),
     ],
     ids=[
         "bot message",
@@ -103,7 +108,40 @@ def test_a_direct_message_is_a_dm():
         "event not listened for",
         "mention in a thread",
         "dm thread reply",
+        "thread reply sent to the channel too",
+        "deletion",
     ],
 )
 def test_only_top_level_human_messages_start_a_run(event, events):
     assert receive(callback(**event), events=events).status == "ignore"
+
+
+def test_a_direct_message_with_a_file_starts_a_run():
+    reception = receive(callback(type="message", channel_type="im", subtype="file_share"))
+
+    assert reception.status == "trigger"
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"x-slack-request-timestamp": "1_790_000_000", "x-slack-signature": "v0=x"},
+        {"x-slack-request-timestamp": str(NOW), "x-slack-signature": "v0=\u00e9"},
+    ],
+    ids=["no headers", "underscored timestamp", "non-ASCII signature"],
+)
+def test_malformed_signing_headers_are_rejected(headers):
+    reception = PROVIDER.receiver.receive(headers, b"{}", secret=SECRET, events=("dm",), now=NOW)
+
+    assert reception.status == "reject"
+
+
+def test_a_deposited_secret_with_a_trailing_newline_still_verifies():
+    headers, body = request({"type": "url_verification", "challenge": "c"})
+
+    reception = PROVIDER.receiver.receive(
+        headers, body, secret=SECRET + "\n", events=("dm",), now=NOW
+    )
+
+    assert reception.status == "respond"

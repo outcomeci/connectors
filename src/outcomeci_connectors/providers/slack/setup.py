@@ -3,6 +3,11 @@
 The generated manifest asks for exactly what the provider uses: the scopes of
 the `post`, `thread` and `reactions` operations, and an event subscription to
 the workflow's webhook URL for each event its trigger listens for.
+
+Setup takes two passes, because Slack verifies the request URL when the
+manifest is applied and the webhook can only answer once the app's signing
+secret is in the Vault: first without a request URL, to create the app, then
+with it, once the signing secret is deposited.
 """
 
 from __future__ import annotations
@@ -49,10 +54,20 @@ def _events(events: Collection[str]) -> list[str]:
     return chosen
 
 
-def _manifest(name: str, *, request_url: str, events: Collection[str]) -> dict[str, object]:
-    if not request_url.startswith("https://"):
+def _manifest(name: str, *, request_url: str | None, events: Collection[str]) -> dict[str, object]:
+    if request_url is not None and not request_url.startswith("https://"):
         raise SlackError("The Slack request URL must be the workflow's https webhook URL")
     chosen = _events(events)
+    settings: dict[str, object] = {
+        "org_deploy_enabled": False,
+        "socket_mode_enabled": False,
+        "token_rotation_enabled": False,
+    }
+    if request_url is not None:
+        settings["event_subscriptions"] = {
+            "request_url": request_url,
+            "bot_events": sorted(SUBSCRIPTIONS[event][0] for event in chosen),
+        }
     return {
         "display_information": {
             "name": name,
@@ -72,15 +87,7 @@ def _manifest(name: str, *, request_url: str, events: Collection[str]) -> dict[s
                 "bot": sorted({*OPERATION_SCOPES, *(SUBSCRIPTIONS[event][1] for event in chosen)})
             }
         },
-        "settings": {
-            "event_subscriptions": {
-                "request_url": request_url,
-                "bot_events": sorted(SUBSCRIPTIONS[event][0] for event in chosen),
-            },
-            "org_deploy_enabled": False,
-            "socket_mode_enabled": False,
-            "token_rotation_enabled": False,
-        },
+        "settings": settings,
     }
 
 
@@ -92,19 +99,18 @@ def scaffold(
     workspace: Path,
     name: str,
     *,
-    request_url: str,
+    request_url: str | None = None,
     events: Collection[str] = tuple(EVENTS),
-    force: bool = False,
 ) -> Path:
+    """Write the Slack CLI project. The manifest is regenerated every time, so
+    it always matches the trigger it was set up for."""
     project = workspace / PROJECT_RELATIVE
     project.mkdir(parents=True, exist_ok=True)
     slack_dir = project / ".slack"
     slack_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = project / "manifest.json"
-    if force or not manifest_path.exists():
-        value = _manifest(name, request_url=request_url, events=events)
-        manifest_path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    value = _manifest(name, request_url=request_url, events=events)
     managed_files = {
+        project / "manifest.json": json.dumps(value, indent=2) + "\n",
         slack_dir / "hooks.json": json.dumps(_hooks(), indent=2) + "\n",
         slack_dir / ".gitignore": "apps.dev.json\ncache/\n",
     }
@@ -181,22 +187,22 @@ def _validate(
 def setup(
     workspace: Path,
     *,
-    request_url: str,
+    request_url: str | None = None,
     events: Collection[str] = tuple(EVENTS),
     name: str = "OutcomeCI",
     team: str | None = None,
-    force: bool = False,
     runner: CommandRunner = subprocess.run,
 ) -> dict[str, object]:
     """Generate the manifest, create or update and install the Slack app, and
-    report the two credentials the workflow needs next.
+    report what comes next.
 
     `request_url` is the workflow's webhook URL. Slack verifies it when the
-    manifest is applied, so the workflow must already declare its Slack trigger.
+    manifest is applied, so pass it only once the workflow declares its Slack
+    trigger and its signing secret is in the Vault, granted to the workflow.
     """
     workspace = workspace.resolve()
     slack = _require_slack()
-    project = scaffold(workspace, name, request_url=request_url, events=events, force=force)
+    project = scaffold(workspace, name, request_url=request_url, events=events)
 
     if not _authorized(slack, project, runner):
         login = _invoke([slack, "login"], cwd=project, runner=runner)
@@ -225,15 +231,25 @@ def setup(
     install = _invoke(command, cwd=project, runner=runner)
     if install.returncode != 0:
         raise SlackError("Slack app installation did not complete")
+    if request_url is not None:
+        return {
+            "configured": True,
+            "project": str(project),
+            "subscribed": request_url,
+            "next": [],
+        }
     return {
         "configured": True,
         "project": str(project),
+        "subscribed": None,
         "next": [
             "oci integration slack sync-credentials --workspace "
             + str(workspace)
             + " --cloud <workspace-id> --workflow <workflow-id>",
             "Deposit the app's Signing Secret (Slack app settings, Basic Information) "
             "in the Vault at the path the trigger's auth names, granted to the workflow.",
+            "Rerun this setup with --request-url <the workflow's webhook URL> to "
+            "subscribe the app to its events.",
         ],
     }
 
