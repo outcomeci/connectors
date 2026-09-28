@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...provider import Grantable, Operation, Provider, Watcher
+from .receiver import RECEIVER
 
 CHANNEL = Grantable(field="channel")
 THREAD = Grantable(field="thread_ts")
@@ -126,4 +127,5 @@ PROVIDER = Provider(
             thread_field="thread_ts",
         ),
     },
+    receiver=RECEIVER,
 )

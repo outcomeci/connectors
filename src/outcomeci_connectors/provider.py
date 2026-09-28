@@ -4,7 +4,8 @@ A provider is data plus pure functions. It never makes a network call and
 never holds a secret: the OutcomeCI runtime executes every request through
 its credential broker, which journals each call. A provider only describes
 the operations a workflow may be granted, how a grant argument constrains a
-call, and how to read a watched response (a reaction or a reply).
+call, how to read a watched response (a reaction or a reply), and how to turn
+the provider's own inbound request into a workflow trigger.
 
 The runtime reads a provider through `Provider.contract()`, a plain JSON
 document versioned by `CONTRACT_VERSION`, so the runtime never depends on
@@ -138,6 +139,50 @@ class Watcher:
     thread_field: str | None = None
 
 
+RECEPTIONS = {"reject", "respond", "ignore", "trigger"}
+
+
+@dataclass(frozen=True)
+class Reception:
+    """What to do with one inbound request.
+
+    `reject`: the request did not prove it came from the provider. `respond`:
+    answer with `response` and start nothing, as for a URL handshake. `ignore`:
+    acknowledge and start nothing. `trigger`: start a run with `trigger` as its
+    input, once per `event_id` however often the provider redelivers it.
+    """
+
+    status: str
+    reason: str = ""
+    response: Mapping[str, Any] | None = None
+    event_id: str | None = None
+    trigger: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in RECEPTIONS:
+            raise ValueError(f"unsupported reception: {self.status}")
+        if (self.status == "respond") != (self.response is not None):
+            raise ValueError("a respond reception carries a response, and only it does")
+        if (self.status == "trigger") != (self.trigger is not None and self.event_id is not None):
+            raise ValueError("a trigger reception carries a trigger and an event_id")
+
+
+@dataclass(frozen=True)
+class Receiver:
+    """Turns the provider's inbound HTTP request into a workflow trigger.
+
+    `receive(headers, body, *, secret, events, now)` gets lowercased headers,
+    the raw body bytes, the signing secret the workflow granted, the event
+    names the workflow asked for (keys of `events`) and the current Unix time,
+    and returns a `Reception`. The runtime owns the route, the secret and
+    deduplication.
+    """
+
+    receive: Callable[..., Reception]
+    events: Mapping[str, str]
+    description: str = ""
+
+
 @dataclass(frozen=True)
 class Provider:
     name: str
@@ -146,6 +191,7 @@ class Provider:
     auth: str = "bearer"
     max_requests: int = 50
     watchers: Mapping[str, Watcher] = field(default_factory=dict)
+    receiver: Receiver | None = None
 
     def __post_init__(self) -> None:
         for name, watcher in self.watchers.items():
@@ -174,6 +220,12 @@ class Provider:
                     "thread_field": watcher.thread_field,
                 }
                 for name, watcher in self.watchers.items()
+            },
+            "receiver": None
+            if self.receiver is None
+            else {
+                "description": self.receiver.description,
+                "events": dict(self.receiver.events),
             },
         }
 

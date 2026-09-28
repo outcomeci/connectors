@@ -1,4 +1,9 @@
-"""Local, user-owned Slack app setup through the official Slack CLI."""
+"""The Slack app behind a workflow's Slack trigger, set up through the Slack CLI.
+
+The generated manifest asks for exactly what the provider uses: the scopes of
+the `post`, `thread` and `reactions` operations, and an event subscription to
+the workflow's webhook URL for each event its trigger listens for.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +12,10 @@ import re
 import shutil
 import subprocess
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
+
+from .receiver import EVENTS, SUBSCRIPTIONS
 
 
 class SlackError(RuntimeError):
@@ -19,41 +26,57 @@ CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 PROJECT_RELATIVE = Path(".outcomeci/integrations/slack")
 
+# post: chat:write. thread: the history scope of each conversation type.
+# reactions: reactions:read.
+OPERATION_SCOPES = (
+    "channels:history",
+    "chat:write",
+    "groups:history",
+    "im:history",
+    "mpim:history",
+    "reactions:read",
+)
 
-def _manifest(name: str) -> dict[str, object]:
+
+def _events(events: Collection[str]) -> list[str]:
+    chosen = sorted(set(events))
+    unknown = [event for event in chosen if event not in EVENTS]
+    if not chosen or unknown:
+        raise SlackError(
+            f"Slack trigger events must be some of {', '.join(sorted(EVENTS))}"
+            + (f"; unknown: {', '.join(unknown)}" if unknown else "")
+        )
+    return chosen
+
+
+def _manifest(name: str, *, request_url: str, events: Collection[str]) -> dict[str, object]:
+    if not request_url.startswith("https://"):
+        raise SlackError("The Slack request URL must be the workflow's https webhook URL")
+    chosen = _events(events)
     return {
         "display_information": {
             "name": name,
-            "description": "Bring human context into local OutcomeCI workflows.",
+            "description": "Starts OutcomeCI workflows and talks with them in threads.",
             "background_color": "#17131f",
         },
         "features": {
             "app_home": {
                 "home_tab_enabled": False,
-                "messages_tab_enabled": True,
+                "messages_tab_enabled": "dm" in chosen,
                 "messages_tab_read_only_enabled": False,
             },
             "bot_user": {"display_name": name, "always_online": False},
         },
         "oauth_config": {
             "scopes": {
-                "bot": [
-                    "channels:history",
-                    "channels:read",
-                    "chat:write",
-                    "groups:history",
-                    "groups:read",
-                    "im:history",
-                    "im:read",
-                    "im:write",
-                    "reactions:read",
-                    "usergroups:read",
-                    "users:read",
-                    "users:read.email",
-                ]
+                "bot": sorted({*OPERATION_SCOPES, *(SUBSCRIPTIONS[event][1] for event in chosen)})
             }
         },
         "settings": {
+            "event_subscriptions": {
+                "request_url": request_url,
+                "bot_events": sorted(SUBSCRIPTIONS[event][0] for event in chosen),
+            },
             "org_deploy_enabled": False,
             "socket_mode_enabled": False,
             "token_rotation_enabled": False,
@@ -62,41 +85,31 @@ def _manifest(name: str) -> dict[str, object]:
 
 
 def _hooks() -> dict[str, object]:
-    return {
-        "hooks": {
-            "get-manifest": "oci integration slack manifest --project .",
-        },
-        "config": {
-            "sdk-managed-connection-enabled": True,
-            "watch": {
-                "manifest": {"paths": ["manifest.json"]},
-            },
-        },
-    }
+    return {"hooks": {"get-manifest": "oci integration slack manifest --project ."}}
 
 
-def scaffold(workspace: Path, name: str, *, force: bool = False) -> Path:
+def scaffold(
+    workspace: Path,
+    name: str,
+    *,
+    request_url: str,
+    events: Collection[str] = tuple(EVENTS),
+    force: bool = False,
+) -> Path:
     project = workspace / PROJECT_RELATIVE
     project.mkdir(parents=True, exist_ok=True)
     slack_dir = project / ".slack"
     slack_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = project / "manifest.json"
     if force or not manifest_path.exists():
-        manifest_path.write_text(json.dumps(_manifest(name), indent=2) + "\n", encoding="utf-8")
+        value = _manifest(name, request_url=request_url, events=events)
+        manifest_path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
     managed_files = {
         slack_dir / "hooks.json": json.dumps(_hooks(), indent=2) + "\n",
-        slack_dir / ".gitignore": "apps.dev.json\ncache/\noutcomeci-runtime.json\n",
+        slack_dir / ".gitignore": "apps.dev.json\ncache/\n",
     }
     for path, content in managed_files.items():
         path.write_text(content, encoding="utf-8")
-    if force:
-        for legacy in (
-            project / "app.py",
-            project / "pyproject.toml",
-            project / "requirements.txt",
-        ):
-            if legacy.exists():
-                legacy.unlink()
     config_path = slack_dir / "config.json"
     if not config_path.exists():
         config_path.write_text(
@@ -168,27 +181,22 @@ def _validate(
 def setup(
     workspace: Path,
     *,
+    request_url: str,
+    events: Collection[str] = tuple(EVENTS),
     name: str = "OutcomeCI",
     team: str | None = None,
-    channel: str | None = None,
     force: bool = False,
     runner: CommandRunner = subprocess.run,
 ) -> dict[str, object]:
-    """Generate the manifest, create/install the Slack app, and report where
-    to sync its credential next. Requires an initialized oci workspace
-    (an outcome.yml must already exist) even though this function neither
-    reads nor writes it -- that's the signal you're in the right directory."""
+    """Generate the manifest, create or update and install the Slack app, and
+    report the two credentials the workflow needs next.
+
+    `request_url` is the workflow's webhook URL. Slack verifies it when the
+    manifest is applied, so the workflow must already declare its Slack trigger.
+    """
     workspace = workspace.resolve()
-    workflow = workspace / "outcome.yml"
-    if not workflow.is_file():
-        raise SlackError(f"{workflow} does not exist; run `oci init --backend filesystem` first")
     slack = _require_slack()
-    project = scaffold(workspace, name, force=force)
-    if channel:
-        (project / "config.json").write_text(
-            json.dumps({"default_target": channel.strip()}, indent=2) + "\n",
-            encoding="utf-8",
-        )
+    project = scaffold(workspace, name, request_url=request_url, events=events, force=force)
 
     if not _authorized(slack, project, runner):
         login = _invoke([slack, "login"], cwd=project, runner=runner)
@@ -220,9 +228,13 @@ def setup(
     return {
         "configured": True,
         "project": str(project),
-        "next": "oci integration slack sync-credentials --workspace "
-        + str(workspace)
-        + " --cloud <workspace-id>",
+        "next": [
+            "oci integration slack sync-credentials --workspace "
+            + str(workspace)
+            + " --cloud <workspace-id> --workflow <workflow-id>",
+            "Deposit the app's Signing Secret (Slack app settings, Basic Information) "
+            "in the Vault at the path the trigger's auth names, granted to the workflow.",
+        ],
     }
 
 
