@@ -46,6 +46,7 @@ def _manifest(name: str) -> dict[str, object]:
                     "im:history",
                     "im:read",
                     "im:write",
+                    "reactions:read",
                     "usergroups:read",
                     "users:read",
                     "users:read.email",

@@ -1,0 +1,183 @@
+"""Declarative provider definitions: what `uses: <provider>` gives a workflow.
+
+A provider is data plus pure functions. It never makes a network call and
+never holds a secret: the OutcomeCI runtime executes every request through
+its credential broker, which journals each call. A provider only describes
+the operations a workflow may be granted, how a grant argument constrains a
+call, and how to read a watched response (a reaction or a reply).
+
+The runtime reads a provider through `Provider.contract()`, a plain JSON
+document versioned by `CONTRACT_VERSION`, so the runtime never depends on
+these classes' shape.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
+CONTRACT_VERSION = "outcomeci.connector/v1"
+ENTRY_POINT_GROUP = "outcomeci.connectors"
+SIDE_EFFECTS = {"read", "create", "update", "delete", "execute"}
+
+
+@dataclass(frozen=True)
+class Grantable:
+    """How one grant argument constrains a call.
+
+    `field`: the call's input field must equal the granted value; the runtime
+    fills it in when the agent leaves it out. `path_prefix`: a request path
+    template, formatted with the granted value's fields, that the call's path
+    must equal or sit under, e.g. "/repos/{owner}/{name}".
+    """
+
+    field: str | None = None
+    path_prefix: str | None = None
+    value_fields: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if (self.field is None) == (self.path_prefix is None):
+            raise ValueError("a grantable argument sets exactly one of field or path_prefix")
+
+    def contract(self) -> dict[str, Any]:
+        if self.field is not None:
+            return {"field": self.field}
+        return {"path_prefix": self.path_prefix, "value_fields": list(self.value_fields)}
+
+
+@dataclass(frozen=True)
+class Deny:
+    """Requests an operation refuses whatever the grants allow.
+
+    Applies to request operations: a call whose method is in `methods` (all
+    methods when empty) and whose path matches the `path` regular expression
+    is refused, with `reason` as the explanation.
+    """
+
+    path: str
+    reason: str
+    methods: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        re.compile(self.path)
+
+    def contract(self) -> dict[str, Any]:
+        return {"methods": sorted(self.methods), "path": self.path, "reason": self.reason}
+
+
+@dataclass(frozen=True)
+class Operation:
+    """One grantable operation.
+
+    A fixed operation sends `method` to `path`, with `query` and `body`
+    templates rendered from the call's input ("{{ input.x }}", or "{{ input }}"
+    for the whole input). A request operation (`methods` set, no `path`) lets
+    the agent choose the method and path within the provider's origin.
+    """
+
+    description: str
+    method: str | None = None
+    path: str | None = None
+    methods: tuple[str, ...] = ()
+    input: Mapping[str, Any] = field(default_factory=lambda: {"type": "object"})
+    query: Mapping[str, Any] | None = None
+    body: Any = None
+    expose: Mapping[str, str] = field(default_factory=lambda: {"result": "body"})
+    side_effect: str = "read"
+    grantable: Mapping[str, Grantable] = field(default_factory=dict)
+    deny: tuple[Deny, ...] = ()
+
+    def __post_init__(self) -> None:
+        fixed = self.method is not None and self.path is not None
+        if fixed == bool(self.methods):
+            raise ValueError(
+                "an operation is either fixed (method and path) or a request (methods)"
+            )
+        if self.side_effect not in SIDE_EFFECTS:
+            raise ValueError(f"unsupported side effect: {self.side_effect}")
+
+    def contract(self) -> dict[str, Any]:
+        request: dict[str, Any]
+        if self.methods:
+            request = {"methods": sorted(self.methods)}
+        else:
+            request = {"method": self.method, "path": self.path}
+            if self.query is not None:
+                request["query"] = dict(self.query)
+            if self.body is not None:
+                request["body"] = self.body
+        return {
+            "description": self.description,
+            "input": dict(self.input),
+            "request": request,
+            "response": {"expose": dict(self.expose)},
+            "side_effect": self.side_effect,
+            "grantable": {name: item.contract() for name, item in self.grantable.items()},
+            "deny": [item.contract() for item in self.deny],
+        }
+
+
+@dataclass(frozen=True)
+class Watcher:
+    """Provider-specific match logic for a human signal the runtime waits on.
+
+    The runtime owns the loop, timeouts and durability: it calls `operation`
+    on the watched message and passes the result to `match`. A watcher that
+    carries a conversation also names how to answer in it: the `respond`
+    operation, with the watched message's id in `thread_field`.
+    """
+
+    operation: str
+    match: Callable[..., Any]
+    description: str = ""
+    respond: str | None = None
+    thread_field: str | None = None
+
+
+@dataclass(frozen=True)
+class Provider:
+    name: str
+    base_url: str
+    operations: Mapping[str, Operation]
+    auth: str = "bearer"
+    max_requests: int = 50
+    watchers: Mapping[str, Watcher] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name, watcher in self.watchers.items():
+            if watcher.operation not in self.operations:
+                raise ValueError(f"watcher {name} reads unknown operation {watcher.operation}")
+            if watcher.respond is not None and watcher.respond not in self.operations:
+                raise ValueError(
+                    f"watcher {name} responds with unknown operation {watcher.respond}"
+                )
+            if (watcher.respond is None) != (watcher.thread_field is None):
+                raise ValueError(f"watcher {name} sets both respond and thread_field, or neither")
+
+    def contract(self) -> dict[str, Any]:
+        return {
+            "schema_version": CONTRACT_VERSION,
+            "name": self.name,
+            "base_url": self.base_url,
+            "auth": {"type": self.auth},
+            "max_requests": self.max_requests,
+            "operations": {name: item.contract() for name, item in self.operations.items()},
+            "watchers": {
+                name: {
+                    "operation": watcher.operation,
+                    "description": watcher.description,
+                    "respond": watcher.respond,
+                    "thread_field": watcher.thread_field,
+                }
+                for name, watcher in self.watchers.items()
+            },
+        }
+
+    def digest(self) -> str:
+        """Content hash of the contract, recorded like a lock file entry."""
+        encoded = json.dumps(self.contract(), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
