@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..provider import Deny, Grantable, Operation, Provider
+from ..provider import Compare, Deny, Grantable, Operation, Provider
 
 REPO = Grantable(path_prefix="/repos/{owner}/{name}", value_fields=("owner", "name"))
 CHANGES = ("PATCH", "POST", "PUT")
@@ -24,6 +24,15 @@ WRITE_DENY = (
     Deny(path=REPOSITORY + r"/pulls/\d+/merge$", methods=CHANGES, reason="merging"),
     Deny(path=REPOSITORY + r"/merges$", methods=CHANGES, reason="merging"),
     Deny(path=REPOSITORY + r"/git/refs/", methods=("PATCH",), reason="moving existing branches"),
+)
+
+# A reviewer sees a committed file as a diff against the branch's current copy.
+FILE_WRITE = Compare(
+    path=REPOSITORY + r"/contents/.+",
+    proposed="body.content",
+    current="body.content",
+    ref="body.branch",
+    encoding="base64",
 )
 
 PROVIDER = Provider(
@@ -50,6 +59,7 @@ PROVIDER = Provider(
             side_effect="execute",
             grantable={"repo": REPO},
             deny=WRITE_DENY,
+            compare=(FILE_WRITE,),
         ),
     },
     max_requests=100,

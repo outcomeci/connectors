@@ -110,6 +110,46 @@ class Deny:
 
 
 @dataclass(frozen=True)
+class Compare:
+    """A write that replaces a file, shown to a policy reviewer as a diff.
+
+    Applies to request operations: a call whose method is in `methods` and
+    whose path matches the `path` regular expression. The runtime reads the
+    current file with a GET to the same path, passing the request field `ref`
+    (a request path such as "body.branch") as the `ref` query parameter, and
+    diffs the response's `current` against the request's `proposed`. Both are
+    decoded with `encoding` ("base64" or "text").
+    """
+
+    path: str
+    proposed: str
+    current: str
+    methods: tuple[str, ...] = ("PUT",)
+    ref: str | None = None
+    encoding: str = "text"
+
+    def __post_init__(self) -> None:
+        re.compile(self.path)
+        if self.encoding not in {"base64", "text"}:
+            raise ValueError(f"unsupported encoding: {self.encoding}")
+        if not all(
+            value.startswith("body")
+            for value in (self.proposed, self.current, *([self.ref] if self.ref else []))
+        ):
+            raise ValueError("compare fields are body paths")
+
+    def contract(self) -> dict[str, Any]:
+        return {
+            "methods": sorted(self.methods),
+            "path": self.path,
+            "proposed": self.proposed,
+            "current": self.current,
+            "ref": self.ref,
+            "encoding": self.encoding,
+        }
+
+
+@dataclass(frozen=True)
 class Operation:
     """One grantable operation.
 
@@ -131,11 +171,14 @@ class Operation:
     grantable: Mapping[str, Grantable] = field(default_factory=dict)
     deny: tuple[Deny, ...] = ()
     download: Download | None = None
+    compare: tuple[Compare, ...] = ()
 
     def __post_init__(self) -> None:
         fixed = self.method is not None and self.path is not None
         if self.download is not None and not fixed:
             raise ValueError("only a fixed operation can download")
+        if self.compare and fixed:
+            raise ValueError("only a request operation can compare")
         if fixed == bool(self.methods):
             raise ValueError(
                 "an operation is either fixed (method and path) or a request (methods)"
@@ -164,6 +207,7 @@ class Operation:
             "side_effect": self.side_effect,
             "grantable": {name: item.contract() for name, item in self.grantable.items()},
             "deny": [item.contract() for item in self.deny],
+            **({"compare": [item.contract() for item in self.compare]} if self.compare else {}),
         }
 
 
