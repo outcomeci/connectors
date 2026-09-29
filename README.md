@@ -15,6 +15,7 @@ with `uses:`, and the cli finds installed providers through the
 ```
 outcomeci_connectors/
   provider.py          # Provider, Operation, Grantable, Deny, Download, Watcher, Receiver
+  auth.py              # the credential kinds a provider accepts
   providers/
     slack/
       __init__.py      # PROVIDER: post, thread, file, reactions; reaction and reply watchers
@@ -28,6 +29,13 @@ Each provider package owns everything about its provider:
 
 - **Operations:** what `uses: <provider>` resolves to, with input shapes,
   request templates and response mapping.
+- **Auth:** the credential kinds the API accepts, in order of preference, with
+  the fixed parameters the provider knows, such as a token endpoint or the
+  header a key goes in. A workflow names only a credential
+  (`auth: secrets.github`), and the runtime takes the method from that
+  credential. Slack accepts a bot token, or a refresh token for an app with
+  token rotation; GitHub accepts a personal access token, or a GitHub App
+  installation.
 - **Grant vocabulary:** which arguments a grant may scope, such as a Slack
   `channel` or `thread_ts`, or a GitHub `repo`, and the requests an operation
   refuses whatever the grant. A grant pins an input field, bounds a request
@@ -51,7 +59,20 @@ Each provider package owns everything about its provider:
 
 The runtime reads a provider through `Provider.contract()`, the versioned
 `outcomeci.connector/v1` document, and locks its digest into each workflow
-revision.
+revision. The contract's `auth` field is `{"accepts": [...]}`, one entry per
+accepted kind:
+
+```json
+{"kind": "token", "description": "...", "credential": ["value"],
+ "header": "Authorization", "scheme": "Bearer"}
+```
+
+## Adding a connector
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the authoring guide, for people and
+coding agents: file layout, operations, grantables, deny rules, watchers,
+receivers, auth declarations with an example of each kind, testing and the
+review bar.
 
 ## Development
 
@@ -61,4 +82,13 @@ pytest
 ruff check .
 ```
 
-Versioned via git tags (`vX.Y.Z`), the same convention as `outcomeci-cli`.
+## Releases
+
+Every merge to `main` releases automatically. `.github/workflows/publish.yml`
+reads the conventional commits since the last `vX.Y.Z` tag: `fix:` releases a
+patch, `feat:` a minor version, and while the version is 0.x a breaking change
+(`feat!:`) is a minor version too. Commits such as `docs:` or `ci:` release
+nothing. The workflow tests, builds with `python -m build` (hatch-vcs reads the
+version from the tag), publishes to PyPI through trusted publishing with no
+stored token, pushes the tag and creates a GitHub release with generated
+notes. Pushing a `vX.Y.Z` tag by hand releases that exact version the same way.
