@@ -1,0 +1,77 @@
+name: Publish
+
+# Releases outcomeci-connectors to PyPI when a vX.Y.Z tag is pushed.
+#
+# hatch-vcs derives the version from the tag, so the checkout needs the full
+# history and tags. Publishing uses PyPI trusted publishing (OIDC): PyPI trusts
+# this repository, this workflow file and the `pypi` environment, and no API
+# token is stored anywhere. Configure the trusted publisher on PyPI with
+# workflow `publish.yml` and environment `pypi` before the first release.
+#
+# Self-contained by design: this repository depends on nothing private to
+# build or release.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test
+        run: |
+          pip install --index-url https://pypi.org/simple -e '.[test]'
+          ruff check .
+          ruff format --check .
+          pytest -q
+
+      - name: Build
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          pip install --index-url https://pypi.org/simple build
+          python -m build
+          # The tag is the version: refuse to publish anything else, such as a
+          # dev version from a tag hatch-vcs could not read.
+          expected="${TAG#v}"
+          for file in dist/*; do
+            case "$(basename "$file")" in
+              outcomeci_connectors-"$expected"-*.whl | outcomeci_connectors-"$expected".tar.gz) ;;
+              *) echo "::error::$file does not carry version $expected"; exit 1 ;;
+            esac
+          done
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/outcomeci-connectors/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
