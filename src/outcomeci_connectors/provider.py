@@ -9,7 +9,9 @@ the provider's own inbound request into a workflow trigger.
 
 The runtime reads a provider through `Provider.contract()`, a plain JSON
 document versioned by `CONTRACT_VERSION`, so the runtime never depends on
-these classes' shape.
+these classes' shape. Its `auth` field is `{"accepts": [<kind>, ...]}`: the
+credential kinds the API accepts, in order of preference, each with the
+fixed parameters the provider knows (see `auth.py`).
 """
 
 from __future__ import annotations
@@ -20,6 +22,41 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+
+from .auth import (
+    OIDC,
+    ApiKey,
+    AppInstallation,
+    Auth,
+    Basic,
+    JwtBearer,
+    NoAuth,
+    OAuth2,
+    Token,
+    auth_contract,
+    check_accepts,
+)
+
+__all__ = [
+    "CONTRACT_VERSION",
+    "OIDC",
+    "ApiKey",
+    "AppInstallation",
+    "Auth",
+    "Basic",
+    "Deny",
+    "Download",
+    "Grantable",
+    "JwtBearer",
+    "NoAuth",
+    "OAuth2",
+    "Operation",
+    "Provider",
+    "Reception",
+    "Receiver",
+    "Token",
+    "Watcher",
+]
 
 CONTRACT_VERSION = "outcomeci.connector/v1"
 ENTRY_POINT_GROUP = "outcomeci.connectors"
@@ -277,15 +314,22 @@ class Receiver:
 
 @dataclass(frozen=True)
 class Provider:
+    """One API a workflow can bind with `uses: <name>`.
+
+    `auth` lists the credential kinds the API accepts, in order of preference;
+    the credential a workflow binds picks one at run time (see `auth.py`).
+    """
+
     name: str
     base_url: str
     operations: Mapping[str, Operation]
-    auth: str = "bearer"
+    auth: tuple[Auth, ...] = (Token(),)
     max_requests: int = 50
     watchers: Mapping[str, Watcher] = field(default_factory=dict)
     receiver: Receiver | None = None
 
     def __post_init__(self) -> None:
+        check_accepts(self.auth)
         for name, watcher in self.watchers.items():
             if watcher.operation not in self.operations:
                 raise ValueError(f"watcher {name} reads unknown operation {watcher.operation}")
@@ -306,7 +350,7 @@ class Provider:
             "schema_version": CONTRACT_VERSION,
             "name": self.name,
             "base_url": self.base_url,
-            "auth": {"type": self.auth},
+            "auth": auth_contract(self.auth),
             "max_requests": self.max_requests,
             "operations": {name: item.contract() for name, item in self.operations.items()},
             "watchers": {
@@ -328,6 +372,11 @@ class Provider:
         }
 
     def digest(self) -> str:
-        """Content hash of the contract, recorded like a lock file entry."""
+        """Content hash of the contract, recorded like a lock file entry.
+
+        It covers everything the contract carries, the accepted credential
+        kinds and their fixed parameters included, so a change to how a
+        provider authenticates changes its digest.
+        """
         encoded = json.dumps(self.contract(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode()).hexdigest()

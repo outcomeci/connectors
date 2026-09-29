@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..provider import Compare, Deny, Grantable, Operation, Provider
+from ..provider import AppInstallation, Compare, Deny, Grantable, Operation, Provider, Token
 
 REPO = Grantable(path_prefix="/repos/{owner}/{name}", value_fields=("owner", "name"))
 CHANGES = ("PATCH", "POST", "PUT")
@@ -35,9 +35,28 @@ FILE_WRITE = Compare(
     encoding="base64",
 )
 
+# A personal access token, classic or fine-grained, is sent as a bearer
+# token. A GitHub App authenticates as one installation: a JWT signed with the
+# app's private key buys an installation token that lasts an hour.
+AUTH = (
+    Token(description="A GitHub personal access token, classic or fine-grained."),
+    AppInstallation(
+        token_url="https://api.github.com/app/installations/{installation_id}/access_tokens",
+        headers=(
+            ("Accept", "application/vnd.github+json"),
+            ("X-GitHub-Api-Version", "2022-11-28"),
+        ),
+        description=(
+            "A GitHub App installation: the app's client id or app id, the installation "
+            "id and the app's private key, exchanged for a one-hour installation token."
+        ),
+    ),
+)
+
 PROVIDER = Provider(
     name="github",
     base_url="https://api.github.com",
+    auth=AUTH,
     operations={
         "read": Operation(
             description=(

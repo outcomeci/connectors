@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...provider import Download, Grantable, Operation, Provider, Watcher
+from ...provider import Download, Grantable, OAuth2, Operation, Provider, Token, Watcher
 from .messages import HUMAN_SUBTYPES, files
 from .receiver import RECEIVER
 
@@ -55,9 +55,28 @@ def human_replies(
     return sorted(replies, key=lambda reply: float(reply["ts"]))
 
 
+# A bot token (xoxb-) is sent as a bearer token. An app with token rotation
+# turned on holds a refresh token instead: it expires its access tokens after
+# 12 hours, and each refresh returns a new refresh token and revokes the one it
+# used. Slack prefers the client id and secret over HTTP Basic.
+AUTH = (
+    Token(description="A Slack bot token (xoxb-), sent as a bearer token."),
+    OAuth2(
+        token_url="https://slack.com/api/oauth.v2.access",
+        grant_types=("refresh_token",),
+        client_auth="basic",
+        rotates_refresh_token=True,
+        description=(
+            "A Slack app with token rotation: its client id and secret and a refresh "
+            "token, exchanged for a 12-hour bot token."
+        ),
+    ),
+)
+
 PROVIDER = Provider(
     name="slack",
     base_url="https://slack.com",
+    auth=AUTH,
     operations={
         "post": Operation(
             description=(
