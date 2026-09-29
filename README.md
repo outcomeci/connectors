@@ -82,7 +82,13 @@ pytest
 ruff check .
 ```
 
-Versioned via git tags (`vX.Y.Z`), the same convention as `outcomeci-cli`:
-hatch-vcs reads the version from the tag. Pushing a `v*` tag runs
-`.github/workflows/publish.yml`, which tests, builds with `python -m build` and
-publishes to PyPI through trusted publishing, with no stored token.
+## Releases
+
+Every merge to `main` releases automatically. `.github/workflows/publish.yml`
+reads the conventional commits since the last `vX.Y.Z` tag: `fix:` releases a
+patch, `feat:` a minor version, and while the version is 0.x a breaking change
+(`feat!:`) is a minor version too. Commits such as `docs:` or `ci:` release
+nothing. The workflow tests, builds with `python -m build` (hatch-vcs reads the
+version from the tag), publishes to PyPI through trusted publishing with no
+stored token, pushes the tag and creates a GitHub release with generated
+notes. Pushing a `vX.Y.Z` tag by hand releases that exact version the same way.

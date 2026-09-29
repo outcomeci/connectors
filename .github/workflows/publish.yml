@@ -1,25 +1,95 @@
 name: Publish
 
-# Releases outcomeci-connectors to PyPI when a vX.Y.Z tag is pushed.
+# Releases outcomeci-connectors to PyPI.
 #
-# hatch-vcs derives the version from the tag, so the checkout needs the full
-# history and tags. Publishing uses PyPI trusted publishing (OIDC): PyPI trusts
-# this repository, this workflow file and the `pypi` environment, and no API
-# token is stored anywhere. Configure the trusted publisher on PyPI with
-# workflow `publish.yml` and environment `pypi` before the first release.
+# A push to main releases the next version commitizen reads from the
+# conventional commits since the last tag (fix: patch, feat: minor, and while
+# the version is 0.x a breaking change is a minor too). Pushing a vX.Y.Z tag
+# by hand releases that exact version. Either way the version is tested,
+# built, published to PyPI, tagged and given a GitHub release with generated
+# notes. A tag this workflow pushes does not start it again.
+#
+# hatch-vcs derives the package version from the tag, so the build tags its
+# checkout before building. Publishing uses PyPI trusted publishing (OIDC):
+# PyPI trusts this repository, this workflow file and the `pypi` environment,
+# and no API token is stored anywhere.
 #
 # Self-contained by design: this repository depends on nothing private to
 # build or release.
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.next.outputs.release }}
+      tag: ${{ steps.next.outputs.tag }}
+      new_tag: ${{ steps.next.outputs.new_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Choose the version
+        id: next
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = "tag" ]; then
+            {
+              echo "release=true"
+              echo "tag=$REF_NAME"
+              echo "new_tag=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pip install --index-url https://pypi.org/simple "commitizen>=4,<5"
+          set +e
+          OUTPUT=$(cz bump --get-next 2>&1)
+          STATUS=$?
+          set -e
+          # 3: no commits since the last tag. 21: no commit that bumps the version.
+          if [ "$STATUS" -eq 3 ] || [ "$STATUS" -eq 21 ]; then
+            echo "Nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$STATUS" -ne 0 ]; then printf '%s\n' "$OUTPUT"; exit "$STATUS"; fi
+          NEXT=$(printf '%s\n' "$OUTPUT" | tail -n 1)
+          if ! [[ "$NEXT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::commitizen returned an invalid version: $NEXT"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$NEXT" >/dev/null; then
+            echo "::error::tag v$NEXT already exists"
+            exit 1
+          fi
+          {
+            echo "release=true"
+            echo "tag=v$NEXT"
+            echo "new_tag=true"
+          } >> "$GITHUB_OUTPUT"
+
   build:
+    needs: version
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +100,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Tag the checkout for the build
+        if: needs.version.outputs.new_tag == 'true'
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: git tag "$TAG"
+
       - name: Test
         run: |
           pip install --index-url https://pypi.org/simple -e '.[test]'
@@ -39,7 +115,7 @@ jobs:
 
       - name: Build
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
           pip install --index-url https://pypi.org/simple build
           python -m build
@@ -61,7 +137,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [version, build]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -75,3 +151,32 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release:
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Push the tag
+        if: needs.version.outputs.new_tag == 'true'
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release create "$TAG" dist/* --title "$TAG" --generate-notes --verify-tag
