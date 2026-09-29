@@ -6,6 +6,7 @@ import pytest
 
 from outcomeci_connectors.provider import (
     CONTRACT_VERSION,
+    Compare,
     Download,
     Grantable,
     Operation,
@@ -83,6 +84,33 @@ def test_only_a_fixed_operation_downloads():
         Operation(description="x", methods=("GET",), download=download)
     with pytest.raises(ValueError):
         Download(url="body.url", hosts=(), name="n", content_type="t")
+
+
+def test_only_a_request_operation_compares():
+    compare = Compare(path=r"^/files/.+", proposed="body.content", current="body.content")
+    with pytest.raises(ValueError):
+        Operation(description="x", method="PUT", path="/files/a", compare=(compare,))
+    with pytest.raises(ValueError):
+        Compare(path=r"^/f", proposed="content", current="body.content")
+    with pytest.raises(ValueError):
+        Compare(path=r"^/f", proposed="body.c", current="body.c", encoding="hex")
+
+
+def test_a_github_file_commit_is_reviewed_as_a_diff_against_its_branch():
+    import re
+
+    (rule,) = github.PROVIDER.contract()["operations"]["write"]["compare"]
+    assert rule == {
+        "methods": ["PUT"],
+        "path": rule["path"],
+        "proposed": "body.content",
+        "current": "body.content",
+        "ref": "body.branch",
+        "encoding": "base64",
+    }
+    assert re.search(rule["path"], "/repos/o/r/contents/src/app.py")
+    assert not re.search(rule["path"], "/repos/o/r/pulls")
+    assert "compare" not in github.PROVIDER.contract()["operations"]["read"]
 
 
 def test_a_reply_can_be_files_alone():
