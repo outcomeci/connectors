@@ -11,6 +11,7 @@ from outcomeci_connectors.provider import (
     Grantable,
     Operation,
     Provider,
+    QueryQualifier,
     Watcher,
 )
 from outcomeci_connectors.providers import github, slack
@@ -70,12 +71,36 @@ def test_a_slack_file_is_read_only_where_it_is_shared_and_downloaded_from_slack(
     assert "url" not in " ".join(file["response"]["expose"].values())
 
 
+REPO_QUERY = QueryQualifier(param="q", term="repo:{owner}/{name}", exclusive=("org", "repo"))
+
+
 def test_a_grantable_argument_has_exactly_one_kind():
     Grantable(response_in=("body.file.channels",))
+    Grantable(query_qualifier=REPO_QUERY, value_fields=("owner", "name"))
     with pytest.raises(ValueError):
         Grantable()
     with pytest.raises(ValueError):
         Grantable(field="channel", response_in=("body.file.channels",))
+    with pytest.raises(ValueError):
+        Grantable(path_prefix="/repos/{owner}/{name}", query_qualifier=REPO_QUERY)
+    with pytest.raises(ValueError):
+        Grantable(field="q", query_qualifier=REPO_QUERY)
+
+
+def test_a_query_qualifier_is_a_name_value_term_its_exclusive_names_include():
+    with pytest.raises(ValueError):
+        QueryQualifier(param="", term="repo:{owner}/{name}", exclusive=("repo",))
+    with pytest.raises(ValueError):
+        QueryQualifier(param="q", term="{owner}/{name}", exclusive=("repo",))
+    with pytest.raises(ValueError):
+        QueryQualifier(param="q", term="repo:{owner}/{name}", exclusive=("org",))
+
+
+def test_only_a_request_operation_scopes_a_query():
+    scoped = {"repo": Grantable(query_qualifier=REPO_QUERY, value_fields=("owner", "name"))}
+    Operation(description="x", methods=("GET",), grantable=scoped)
+    with pytest.raises(ValueError):
+        Operation(description="x", method="GET", path="/search", grantable=scoped)
 
 
 def test_only_a_fixed_operation_downloads():
@@ -148,6 +173,53 @@ def test_github_read_and_write_are_request_operations_scoped_by_repo():
         "path_prefix": "/repos/{owner}/{name}",
         "value_fields": ["owner", "name"],
     }
+
+
+def test_github_search_is_a_get_of_code_search_scoped_by_the_repo_qualifier():
+    operations = github.PROVIDER.contract()["operations"]
+    search = operations["search"]
+    assert search["request"] == {"methods": ["GET"]}
+    assert search["side_effect"] == operations["read"]["side_effect"] == "read"
+    assert search["grantable"] == {
+        "repo": {
+            "query_qualifier": {
+                "param": "q",
+                "term": "repo:{owner}/{name}",
+                "exclusive": ["org", "owner", "repo", "user"],
+                "operators": ["NOT", "OR"],
+            },
+            "value_fields": ["owner", "name"],
+        }
+    }
+    assert "repo:" in search["description"] and "default branch" in search["description"]
+    assert "\u2014" not in search["description"]
+    assert "compare" not in search
+
+
+@pytest.mark.parametrize(
+    ("path", "denied"),
+    [
+        ("/search/code", False),
+        ("/search/code/", True),
+        ("/search/commits", True),
+        ("/search/issues", True),
+        ("/search/codex", True),
+        ("/repos/o/r/contents/a.py", True),
+        ("/", True),
+    ],
+)
+def test_github_search_denies_every_path_but_code_search(path, denied):
+    import re
+
+    rules = github.PROVIDER.contract()["operations"]["search"]["deny"]
+    assert any(re.search(rule["path"], path) for rule in rules) is denied
+
+
+def test_github_read_and_write_are_unchanged_by_search():
+    operations = github.PROVIDER.contract()["operations"]
+    assert set(operations) == {"read", "search", "write"}
+    assert operations["read"]["grantable"] == operations["write"]["grantable"]
+    assert operations["read"]["deny"] == []
 
 
 def test_digest_changes_with_the_contract():
