@@ -113,6 +113,14 @@ Each `Grantable` sets exactly one of:
 - `response_in`: response paths of lists, one of which must contain the
   granted value, for a resource whose request cannot name its scope. The
   runtime checks it before it does anything else with the response.
+- `query_qualifier`: a `QueryQualifier` for a request operation's search
+  query parameter (`param`, such as `"q"`). Its `term`, a qualifier template
+  formatted with the granted value's `value_fields`, such as
+  `"repo:{owner}/{name}"`, must be one of the query's whitespace-separated
+  terms, and the runtime appends it when the agent leaves it out. The query
+  may hold no other qualifier named in `exclusive` (the names that set a
+  search's scope, the term's own included) and none of the boolean
+  `operators` that could widen or negate the term, such as `OR` and `NOT`.
 
 ## Deny rules
 

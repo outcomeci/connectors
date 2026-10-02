@@ -52,6 +52,7 @@ __all__ = [
     "OAuth2",
     "Operation",
     "Provider",
+    "QueryQualifier",
     "Reception",
     "Receiver",
     "Token",
@@ -61,6 +62,42 @@ __all__ = [
 CONTRACT_VERSION = "outcomeci.connector/v1"
 ENTRY_POINT_GROUP = "outcomeci.connectors"
 SIDE_EFFECTS = {"read", "create", "update", "delete", "execute"}
+
+
+QUALIFIER = re.compile(r"[a-z][a-z_-]*:\S+")
+
+
+@dataclass(frozen=True)
+class QueryQualifier:
+    """A search query that must carry one scope qualifier and widen it with no other.
+
+    `param` names the request's query parameter, such as "q". `term` is a
+    qualifier template, formatted with the granted value's fields, such as
+    "repo:{owner}/{name}". `exclusive` lists the qualifier names that set a
+    search's scope, the term's own included: the query may hold none of them
+    but the granted term, since a search ORs or widens across them.
+    `operators` lists the query's boolean operators, such as "OR" and "NOT",
+    which could widen or negate the term, and which the query may not use.
+    """
+
+    param: str
+    term: str
+    exclusive: tuple[str, ...]
+    operators: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.param or not QUALIFIER.fullmatch(self.term):
+            raise ValueError("a query qualifier names a parameter and a name:value term")
+        if self.term.split(":", 1)[0] not in self.exclusive:
+            raise ValueError("a query qualifier's exclusive names include its own term's name")
+
+    def contract(self) -> dict[str, Any]:
+        return {
+            "param": self.param,
+            "term": self.term,
+            "exclusive": sorted(self.exclusive),
+            "operators": sorted(self.operators),
+        }
 
 
 @dataclass(frozen=True)
@@ -74,19 +111,30 @@ class Grantable:
     response paths of lists, one of which must contain the granted value, for
     a resource whose request cannot name its scope, such as a file and the
     conversations it is shared in. The runtime checks it before anything else
-    happens with the response, a download included.
+    happens with the response, a download included. `query_qualifier`: for a
+    request operation, a search query parameter scoped by one qualifier term,
+    such as "repo:{owner}/{name}" formatted with the granted value's fields;
+    the runtime appends the term when the agent leaves it out and refuses any
+    other scope qualifier or boolean operator (see `QueryQualifier`).
     """
 
     field: str | None = None
     path_prefix: str | None = None
     value_fields: tuple[str, ...] = ()
     response_in: tuple[str, ...] = ()
+    query_qualifier: QueryQualifier | None = None
 
     def __post_init__(self) -> None:
-        kinds = (self.field is not None, self.path_prefix is not None, bool(self.response_in))
+        kinds = (
+            self.field is not None,
+            self.path_prefix is not None,
+            bool(self.response_in),
+            self.query_qualifier is not None,
+        )
         if sum(kinds) != 1:
             raise ValueError(
-                "a grantable argument sets exactly one of field, path_prefix or response_in"
+                "a grantable argument sets exactly one of field, path_prefix, response_in "
+                "or query_qualifier"
             )
 
     def contract(self) -> dict[str, Any]:
@@ -94,6 +142,11 @@ class Grantable:
             return {"field": self.field}
         if self.response_in:
             return {"response_in": list(self.response_in)}
+        if self.query_qualifier is not None:
+            return {
+                "query_qualifier": self.query_qualifier.contract(),
+                "value_fields": list(self.value_fields),
+            }
         return {"path_prefix": self.path_prefix, "value_fields": list(self.value_fields)}
 
 
@@ -216,6 +269,8 @@ class Operation:
             raise ValueError("only a fixed operation can download")
         if self.compare and fixed:
             raise ValueError("only a request operation can compare")
+        if fixed and any(item.query_qualifier for item in self.grantable.values()):
+            raise ValueError("only a request operation scopes a query")
         if fixed == bool(self.methods):
             raise ValueError(
                 "an operation is either fixed (method and path) or a request (methods)"

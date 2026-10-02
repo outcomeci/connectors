@@ -2,9 +2,34 @@
 
 from __future__ import annotations
 
-from ..provider import AppInstallation, Compare, Deny, Grantable, Operation, Provider, Token
+from ..provider import (
+    AppInstallation,
+    Compare,
+    Deny,
+    Grantable,
+    Operation,
+    Provider,
+    QueryQualifier,
+    Token,
+)
 
 REPO = Grantable(path_prefix="/repos/{owner}/{name}", value_fields=("owner", "name"))
+
+# Code search is not under /repos/{owner}/{name}, so a repository grant scopes
+# its query instead: `repo:owner/name`, and none of the qualifiers that pick
+# which repositories a search covers, since GitHub ORs repeated ones, nor the
+# OR and NOT operators, which could widen or negate it.
+# https://docs.github.com/en/rest/search/search#search-code
+# https://docs.github.com/en/search-github/searching-on-github/searching-code
+SEARCH_REPO = Grantable(
+    query_qualifier=QueryQualifier(
+        param="q",
+        term="repo:{owner}/{name}",
+        exclusive=("org", "owner", "repo", "user"),
+        operators=("NOT", "OR"),
+    ),
+    value_fields=("owner", "name"),
+)
 CHANGES = ("PATCH", "POST", "PUT")
 REPOSITORY = r"^/repos/[^/]+/[^/]+"
 
@@ -65,6 +90,19 @@ PROVIDER = Provider(
             ),
             methods=("GET",),
             grantable={"repo": REPO},
+        ),
+        "search": Operation(
+            description=(
+                "Search a repository's code: send a GET to /search/code with the search terms "
+                'in the query parameter q, such as query {"q": "parse_config language:python"}, '
+                "not in the path. The runtime adds repo:{owner}/{repo} for the granted repository; any other "
+                "repo:, org:, user: or owner: qualifier, OR or NOT is refused. Returns matching "
+                "files with their paths; read a file with the read operation. GitHub searches "
+                "the default branch only, and code search allows about 10 requests a minute."
+            ),
+            methods=("GET",),
+            grantable={"repo": SEARCH_REPO},
+            deny=(Deny(path=r"^(?!/search/code$)", reason="search covers code only"),),
         ),
         "write": Operation(
             description=(

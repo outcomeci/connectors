@@ -22,7 +22,7 @@ outcomeci_connectors/
       messages.py      # the files and subtypes a message carries
       receiver.py      # signed Events API requests to a workflow trigger
       setup.py         # app manifest, Slack CLI setup and status
-    github.py          # PROVIDER: read and write, scoped by repo
+    github.py          # PROVIDER: read, search and write, scoped by repo
 ```
 
 Each provider package owns everything about its provider:
