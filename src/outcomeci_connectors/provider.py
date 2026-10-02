@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import string
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -44,6 +45,7 @@ __all__ = [
     "AppInstallation",
     "Auth",
     "Basic",
+    "Compare",
     "Deny",
     "Download",
     "Grantable",
@@ -199,16 +201,28 @@ class Deny:
         return {"methods": sorted(self.methods), "path": self.path, "reason": self.reason}
 
 
+ENCODINGS = {"base64", "text"}
+
+
 @dataclass(frozen=True)
 class Compare:
-    """A write that replaces a file, shown to a policy reviewer as a diff.
+    """A write that replaces a file, or several, shown to a policy reviewer as a diff.
 
     Applies to request operations: a call whose method is in `methods` and
     whose path matches the `path` regular expression. The runtime reads the
     current file with a GET to the same path, passing the request field `ref`
     (a request path such as "body.branch") as the `ref` query parameter, and
     diffs the response's `current` against the request's `proposed`. Both are
-    decoded with `encoding` ("base64" or "text").
+    decoded with `encoding` ("base64" or "text"), or the current copy with
+    `current_encoding` when it is set.
+
+    A write of several files at once sets `entries`, a request path to the
+    list of files, such as "body.tree". Each entry names its file in the field
+    `entry_path` and its new content in the field `proposed`; an entry whose
+    field `deletion` is present and null deletes its file. The runtime reads
+    each file's current copy with a GET to `current_path`, a template formatted
+    with the named groups of `path` and `file`, the entry's file path, such as
+    "/repos/{owner}/{repo}/contents/{file}".
     """
 
     path: str
@@ -217,18 +231,42 @@ class Compare:
     methods: tuple[str, ...] = ("PUT",)
     ref: str | None = None
     encoding: str = "text"
+    current_encoding: str | None = None
+    entries: str | None = None
+    entry_path: str | None = None
+    deletion: str | None = None
+    current_path: str | None = None
 
     def __post_init__(self) -> None:
-        re.compile(self.path)
-        if self.encoding not in {"base64", "text"}:
-            raise ValueError(f"unsupported encoding: {self.encoding}")
-        if not all(
-            value.startswith("body")
-            for value in (self.proposed, self.current, *([self.ref] if self.ref else []))
-        ):
+        pattern = re.compile(self.path)
+        if self.encoding not in ENCODINGS or self.current_encoding not in {None, *ENCODINGS}:
+            raise ValueError(f"unsupported encoding: {self.encoding}, {self.current_encoding}")
+        bodies = (self.current, *([self.ref] if self.ref else []))
+        if self.entries is None:
+            if any((self.entry_path, self.deletion, self.current_path)):
+                raise ValueError("entry_path, deletion and current_path describe entries")
+            bodies = (self.proposed, *bodies)
+        else:
+            bodies = (self.entries, *bodies)
+            if not self.entry_path or not self.proposed or not self.current_path:
+                raise ValueError("compared entries name entry_path, proposed and current_path")
+            fields = {name for _, name, _, _ in string.Formatter().parse(self.current_path)}
+            fields.discard(None)
+            if "file" not in fields or not fields <= {"file", *pattern.groupindex}:
+                raise ValueError(
+                    "current_path is formatted with {file} and the path's named groups only"
+                )
+        if not all(value.startswith("body") for value in bodies):
             raise ValueError("compare fields are body paths")
 
     def contract(self) -> dict[str, Any]:
+        optional = {
+            "current_encoding": self.current_encoding,
+            "entries": self.entries,
+            "entry_path": self.entry_path,
+            "deletion": self.deletion,
+            "current_path": self.current_path,
+        }
         return {
             "methods": sorted(self.methods),
             "path": self.path,
@@ -236,6 +274,7 @@ class Compare:
             "current": self.current,
             "ref": self.ref,
             "encoding": self.encoding,
+            **{key: value for key, value in optional.items() if value is not None},
         }
 
 

@@ -60,6 +60,24 @@ FILE_WRITE = Compare(
     encoding="base64",
 )
 
+# A commit of several files at once builds a tree: each entry carries its new
+# text, or `"sha": null` to delete the file. A reviewer sees each file as a diff
+# against its current copy, read from the default branch, since the request
+# names only a base tree sha, which the contents API cannot read at. A tree
+# based on another branch is diffed against the default branch's copy.
+TREE_WRITE = Compare(
+    path=r"^/repos/(?P<owner>[^/]+)/(?P<repo>[^/]+)/git/trees$",
+    methods=("POST",),
+    entries="body.tree",
+    entry_path="path",
+    proposed="content",
+    deletion="sha",
+    current_path="/repos/{owner}/{repo}/contents/{file}",
+    current="body.content",
+    encoding="text",
+    current_encoding="base64",
+)
+
 # A personal access token, classic or fine-grained, is sent as a bearer
 # token. A GitHub App authenticates as one installation: a JWT signed with the
 # app's private key buys an installation token that lasts an hour.
@@ -116,7 +134,7 @@ PROVIDER = Provider(
             side_effect="execute",
             grantable={"repo": REPO},
             deny=WRITE_DENY,
-            compare=(FILE_WRITE,),
+            compare=(FILE_WRITE, TREE_WRITE),
         ),
     },
     max_requests=100,
