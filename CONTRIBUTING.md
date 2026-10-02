@@ -219,7 +219,7 @@ configuration.
 | `token` | `Token()` | `header`, `scheme` | `value` |
 | `api_key` | `ApiKey(...)` | `header` or `query`, `scheme` | `api_key` |
 | `basic` | `Basic()` | none | `username`, `password` |
-| `oauth2` | `OAuth2(...)` | `token_url`, `grant_types`, `scopes`, `audience`, `client_auth`, `rotates_refresh_token` | `client_id`, `client_secret`, and `refresh_token` for a refresh grant |
+| `oauth2` | `OAuth2(...)` | `token_url`, `grant_types`, `scopes`, `audience`, `client_auth`, `rotates_refresh_token`, optional `authorization_url` and `pkce` | `client_id`, `client_secret`, and `refresh_token` for a refresh grant |
 | `oidc` | `OIDC(...)` | `issuer` or `discovery_url`, `scopes`, `audience` | `client_id`, `client_secret`, and `issuer_url` when the issuer varies per account |
 | `jwt_bearer` | `JwtBearer(...)` | `token_url`, `audience`, `scopes` | `issuer`, `subject`, `private_key` |
 | `app_installation` | `AppInstallation(...)` | `token_url` with `{installation_id}`, `headers`, JWT and response fields | `app_id`, `installation_id`, `private_key` |
@@ -302,6 +302,16 @@ auth = (Token(), OAuth2(token_url="https://acme.test/oauth/token"))
 ```
 
 Rules for auth:
+
+- For interactive account connection, declare `authorization_url` alongside
+  a `refresh_token` grant. The runtime runs authorization-code consent once,
+  then uses the existing unattended refresh grant. Interactive authorization
+  always uses PKCE S256 (`pkce=True`, also the default when a URL is declared).
+  `pkce=False` is rejected. These fields are omitted from the contract when
+  interactive authorization is not declared, preserving existing digests.
+  The runtime owns callback URLs, state, verifier generation, encrypted
+  credential storage and token refresh; provider code remains pure data.
+  Initial support is for confidential clients with a client secret.
 
 - Declare a kind only when the provider's documentation says the API accepts
   it, and link that documentation in a comment.

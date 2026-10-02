@@ -14,9 +14,10 @@ dependencies = []
 [project.entry-points."outcomeci.connectors"]
 slack = "outcomeci_connectors.providers.slack:PROVIDER"
 github = "outcomeci_connectors.providers.github:PROVIDER"
+x = "outcomeci_connectors.providers.x:PROVIDER"
 
 [project.optional-dependencies]
-test = ["pytest>=8.3", "ruff>=0.13"]
+test = ["pytest>=8.3", "ruff>=0.13", "jsonschema>=4.23"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/outcomeci_connectors"]
