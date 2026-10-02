@@ -120,6 +120,11 @@ class OAuth2:
     `rotates_refresh_token` is set, every refresh returns a new refresh token
     and revokes the one it used, so the runtime writes the new one back to the
     credential before anything else uses it.
+
+    `authorization_url` opts into the runtime's shared interactive account
+    connection flow. It requires a refresh grant and PKCE S256; `pkce` defaults
+    to true for interactive connections. Unset metadata is omitted so existing
+    provider contracts and digests do not change.
     """
 
     kind: ClassVar[str] = "oauth2"
@@ -130,6 +135,8 @@ class OAuth2:
     client_auth: str = "basic"
     rotates_refresh_token: bool = False
     description: str = ""
+    authorization_url: str | None = None
+    pkce: bool | None = None
 
     def __post_init__(self) -> None:
         _https(self.token_url, "token_url")
@@ -139,6 +146,14 @@ class OAuth2:
             raise ValueError(f"client_auth is one of {sorted(CLIENT_AUTH)}")
         if self.rotates_refresh_token and "refresh_token" not in self.grant_types:
             raise ValueError("only a refresh_token grant rotates its refresh token")
+        if self.authorization_url is not None:
+            _https(self.authorization_url, "authorization_url")
+            if "refresh_token" not in self.grant_types:
+                raise ValueError("interactive authorization requires a refresh_token grant")
+        elif self.pkce is not None:
+            raise ValueError("pkce requires authorization_url")
+        if self.pkce is not None and self.pkce is not True:
+            raise ValueError("interactive authorization requires pkce=True (S256)")
 
     def contract(self) -> dict[str, Any]:
         credential = ["client_id", "client_secret"]
@@ -154,6 +169,14 @@ class OAuth2:
             "audience": self.audience,
             "client_auth": self.client_auth,
             "rotates_refresh_token": self.rotates_refresh_token,
+            **(
+                {
+                    "authorization_url": self.authorization_url,
+                    "pkce": self.pkce if self.pkce is not None else True,
+                }
+                if self.authorization_url is not None
+                else {}
+            ),
         }
 
 

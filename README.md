@@ -23,6 +23,7 @@ outcomeci_connectors/
       receiver.py      # signed Events API requests to a workflow trigger
       setup.py         # app manifest, Slack CLI setup and status
     github.py          # PROVIDER: read, search and write, scoped by repo
+    x.py               # PROVIDER: recent-post search and user-authorized text publishing
 ```
 
 Each provider package owns everything about its provider:
@@ -66,6 +67,70 @@ accepted kind:
 {"kind": "token", "description": "...", "credential": ["value"],
  "header": "Authorization", "scheme": "Bearer"}
 ```
+
+## X search and publishing
+
+Use `uses: x` with a Vault `token` credential containing your X app's bearer
+token. No client ID or client secret is needed for search-only access. Your X
+account must have recent-search access and sufficient API credits; X usage
+is billed separately from OutcomeCI.
+
+Grant `x.search_recent` to search the last seven days. Calls require `query`
+and `max_results` (10–100). The operation returns one page, with `posts`,
+expanded `authors`, `meta`, and any partial `errors`. Missing result fields
+may be null; inspect errors before treating an empty response as no matches.
+Post links can be built as `https://x.com/i/status/<id>`.
+
+Search does not automatically paginate. Neither operation likes, follows, or reads DMs.
+It allows at most ten requests per provider budget. Pin `query` and
+`max_results` in a grant to constrain a workflow's search and page size:
+
+```yaml
+secrets:
+  x: vault:x/bearer-token
+apis:
+  x: {uses: x, auth: secrets.x}
+# Within an agent step:
+# can:
+#   - x.search_recent: {query: '"agent workflows" -is:retweet lang:en', max_results: 10}
+```
+
+See [X's recent-search reference](https://docs.x.com/x-api/posts/search-recent-posts).
+The connector must be released and installed in the API/compiler and runner
+before a cloud workflow can use it. Existing Slack and GitHub contracts are unchanged.
+
+### Connect an account to publish
+
+Publishing requires an X **user-authorized OAuth credential**, not an app-only
+bearer token. Configure your X app as a confidential Web App or automated bot,
+enable OAuth 2.0 and register the exact callback URL shown by OutcomeCI's
+connection flow. Enter the app's client ID and secret through the secure
+connection form, then authorize the account that should publish. Do not paste
+credentials into agent conversations.
+
+The connector declares the authorization endpoint, token endpoint and scopes:
+`tweet.read`, `tweet.write`, `users.read`, and `offline.access`. These allow
+reading and posting as the account and keeping that connection refreshed.
+The shared runtime performs the consent flow with PKCE S256 and stores the
+result in Vault; no X-specific authorization handler is required.
+
+Grant `x.post` separately from `x.search_recent`. Its input is `text` (1–280
+characters), plus optional `reply: {in_reply_to_tweet_id: "..."}`. It returns
+`id` and `text`. X additionally enforces its weighted character limit; media
+and quote posts are not supported. Pin the `text` and `reply` grant arguments
+to constrain approved content and target. The connector does **not** add an
+approval step automatically: put an explicit human approval before publishing.
+Do not blindly retry timed-out publishing requests, which may already have
+created a post.
+
+X restricts self-serve replies to eligible conversations, including where the
+original author mentioned the account or quoted one of its posts. Search
+results alone do not establish reply eligibility. Manual replies may therefore
+be the appropriate action for growth recommendations.
+
+References: [OAuth authorization](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code),
+[confidential client exchange](https://docs.x.com/fundamentals/authentication/oauth-2-0/user-access-token),
+[publishing and reply restrictions](https://docs.x.com/x-api/posts/manage-tweets/introduction).
 
 ## Adding a connector
 

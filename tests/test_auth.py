@@ -149,6 +149,25 @@ def test_oidc_derives_discovery_from_a_fixed_issuer_or_asks_the_credential():
         OIDC(issuer="http://login.p.test")
 
 
+def test_interactive_oauth_is_optional_and_requires_refresh_and_secure_pkce():
+    base = OAuth2(token_url="https://p.test/token", grant_types=("refresh_token",))
+    assert "authorization_url" not in base.contract()
+    assert "pkce" not in base.contract()
+    connected = dataclasses.replace(base, authorization_url="https://p.test/authorize")
+    assert connected.contract()["authorization_url"] == "https://p.test/authorize"
+    assert connected.contract()["pkce"] is True
+    assert _provider(base).digest() != _provider(connected).digest()
+    with pytest.raises(ValueError, match="https"):
+        dataclasses.replace(base, authorization_url="http://p.test/authorize")
+    with pytest.raises(ValueError, match="refresh_token"):
+        OAuth2(token_url="https://p.test/token", authorization_url="https://p.test/authorize")
+    with pytest.raises(ValueError, match="authorization_url"):
+        dataclasses.replace(base, pkce=True)
+    for bad_pkce in (False, "S256", 1):
+        with pytest.raises(ValueError, match="pkce=True"):
+            dataclasses.replace(connected, pkce=bad_pkce)
+
+
 def test_jwt_bearer_names_its_token_endpoint_and_audience():
     contract = JwtBearer(
         token_url="https://oauth2.p.test/token", audience="https://p.test", scopes=("a", "b")
