@@ -131,6 +131,51 @@ administration, permission changes, billing, destructive bulk actions and
 anything that moves a protected resource, such as merging or force-updating a
 branch. Test each rule with an allowed and a refused request.
 
+## Compared writes
+
+A request operation that writes files lists `Compare` rules, so a policy
+reviewer sees each write as a diff against the file's current copy rather
+than as the whole file. A rule matches a call by `methods` and a `path`
+regular expression. For a write of one file, the runtime reads the current
+copy with a GET to the same path, passing the request field `ref` (such as
+`"body.branch"`) as the `ref` query parameter, and diffs the response's
+`current` field against the request's `proposed` field. Both are body paths,
+decoded with `encoding` (`"base64"` or `"text"`), or the current copy with
+`current_encoding` when the two differ.
+
+```python
+FILE_WRITE = Compare(
+    path=r"^/repos/[^/]+/[^/]+/contents/.+",
+    proposed="body.content",
+    current="body.content",
+    ref="body.branch",
+    encoding="base64",
+)
+```
+
+A write of several files at once sets `entries`, the body path of the list of
+files. In each entry, `entry_path` names the file and `proposed` its new
+content, and an entry whose `deletion` field is present and null deletes the
+file. The runtime reads each file's current copy with a GET to
+`current_path`, formatted with the named groups of `path` and `{file}`, the
+entry's file path. An entry with neither new content nor a deletion, such as
+one that points at an existing blob, is noted rather than diffed.
+
+```python
+TREE_WRITE = Compare(
+    path=r"^/repos/(?P<owner>[^/]+)/(?P<repo>[^/]+)/git/trees$",
+    methods=("POST",),
+    entries="body.tree",
+    entry_path="path",
+    proposed="content",
+    deletion="sha",
+    current_path="/repos/{owner}/{repo}/contents/{file}",
+    current="body.content",
+    encoding="text",
+    current_encoding="base64",
+)
+```
+
 ## Watchers
 
 A `Watcher` is the match logic behind `await` and `converse`: it names the

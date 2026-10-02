@@ -14,7 +14,7 @@ with `uses:`, and the cli finds installed providers through the
 
 ```
 outcomeci_connectors/
-  provider.py          # Provider, Operation, Grantable, Deny, Download, Watcher, Receiver
+  provider.py          # Provider, Operation, Grantable, Deny, Compare, Download, Watcher, Receiver
   auth.py              # the credential kinds a provider accepts
   providers/
     slack/
@@ -70,7 +70,7 @@ accepted kind:
 ## Adding a connector
 
 [CONTRIBUTING.md](CONTRIBUTING.md) is the authoring guide, for people and
-coding agents: file layout, operations, grantables, deny rules, watchers,
+coding agents: file layout, operations, grantables, deny rules, compared writes, watchers,
 receivers, auth declarations with an example of each kind, testing and the
 review bar.
 

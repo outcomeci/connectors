@@ -124,7 +124,7 @@ def test_only_a_request_operation_compares():
 def test_a_github_file_commit_is_reviewed_as_a_diff_against_its_branch():
     import re
 
-    (rule,) = github.PROVIDER.contract()["operations"]["write"]["compare"]
+    rule, _ = github.PROVIDER.contract()["operations"]["write"]["compare"]
     assert rule == {
         "methods": ["PUT"],
         "path": rule["path"],
@@ -136,6 +136,81 @@ def test_a_github_file_commit_is_reviewed_as_a_diff_against_its_branch():
     assert re.search(rule["path"], "/repos/o/r/contents/src/app.py")
     assert not re.search(rule["path"], "/repos/o/r/pulls")
     assert "compare" not in github.PROVIDER.contract()["operations"]["read"]
+
+
+def test_a_single_file_compare_contract_names_no_entries():
+    compare = Compare(path=r"^/f/.+", proposed="body.c", current="body.c", ref="body.b")
+    assert compare.contract() == {
+        "methods": ["PUT"],
+        "path": r"^/f/.+",
+        "proposed": "body.c",
+        "current": "body.c",
+        "ref": "body.b",
+        "encoding": "text",
+    }
+
+
+def test_compared_entries_name_each_file_and_how_to_read_it():
+    entries = {
+        "path": r"^/r/(?P<repo>[^/]+)/tree$",
+        "methods": ("POST",),
+        "entries": "body.tree",
+        "entry_path": "path",
+        "proposed": "content",
+        "current": "body.content",
+        "current_path": "/r/{repo}/files/{file}",
+    }
+    assert Compare(**entries, deletion="sha", current_encoding="base64").contract() == {
+        "methods": ["POST"],
+        "path": r"^/r/(?P<repo>[^/]+)/tree$",
+        "proposed": "content",
+        "current": "body.content",
+        "ref": None,
+        "encoding": "text",
+        "current_encoding": "base64",
+        "entries": "body.tree",
+        "entry_path": "path",
+        "deletion": "sha",
+        "current_path": "/r/{repo}/files/{file}",
+    }
+    for broken in (
+        {"entry_path": None},
+        {"current_path": None},
+        {"entries": "tree"},
+        {"current": "content"},
+        {"current_path": "/r/{repo}/files"},
+        {"current_path": "/r/{owner}/files/{file}"},
+        {"current_encoding": "hex"},
+    ):
+        with pytest.raises(ValueError):
+            Compare(**{**entries, **broken})
+    with pytest.raises(ValueError):
+        Compare(path=r"^/f", proposed="body.c", current="body.c", entry_path="path")
+    with pytest.raises(ValueError):
+        Compare(path=r"^/f", proposed="body.c", current="body.c", current_path="/f/{file}")
+
+
+def test_a_github_tree_is_reviewed_as_a_diff_of_each_file():
+    import re
+
+    _, rule = github.PROVIDER.contract()["operations"]["write"]["compare"]
+    assert rule == {
+        "methods": ["POST"],
+        "path": rule["path"],
+        "proposed": "content",
+        "current": "body.content",
+        "ref": None,
+        "encoding": "text",
+        "current_encoding": "base64",
+        "entries": "body.tree",
+        "entry_path": "path",
+        "deletion": "sha",
+        "current_path": "/repos/{owner}/{repo}/contents/{file}",
+    }
+    match = re.search(rule["path"], "/repos/o/r/git/trees")
+    assert match and match.groupdict() == {"owner": "o", "repo": "r"}
+    assert not re.search(rule["path"], "/repos/o/r/git/trees/abc")
+    assert not re.search(rule["path"], "/repos/o/r/git/commits")
 
 
 def test_a_reply_can_be_files_alone():
