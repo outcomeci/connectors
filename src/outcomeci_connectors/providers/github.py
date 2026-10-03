@@ -7,6 +7,7 @@ from ..provider import (
     Compare,
     Deny,
     Grantable,
+    OAuth2,
     Operation,
     Provider,
     QueryQualifier,
@@ -93,6 +94,18 @@ AUTH = (
             "A GitHub App installation: the app's client id or app id, the installation "
             "id and the app's private key, exchanged for a one-hour installation token."
         ),
+    ),
+    # GitHub.com OAuth apps support PKCE and opt-in expiring tokens.
+    # https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
+    OAuth2(
+        token_url="https://github.com/login/oauth/access_token",
+        authorization_url="https://github.com/login/oauth/authorize",
+        pkce=True,
+        grant_types=("refresh_token",),
+        scopes=("repo", "offline_access"),
+        client_auth="body",
+        rotates_refresh_token=True,
+        description="Authorize a GitHub account with repository access and rotating refresh tokens.",
     ),
 )
 

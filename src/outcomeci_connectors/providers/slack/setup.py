@@ -21,6 +21,7 @@ from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 
 from .receiver import EVENTS, SUBSCRIPTIONS
+from .scopes import OPERATION_SCOPES
 
 
 class SlackError(RuntimeError):
@@ -30,18 +31,6 @@ class SlackError(RuntimeError):
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 PROJECT_RELATIVE = Path(".outcomeci/integrations/slack")
-
-# post: chat:write. thread: the history scope of each conversation type.
-# file: files:read. reactions: reactions:read.
-OPERATION_SCOPES = (
-    "channels:history",
-    "chat:write",
-    "files:read",
-    "groups:history",
-    "im:history",
-    "mpim:history",
-    "reactions:read",
-)
 
 
 def _events(events: Collection[str]) -> list[str]:
