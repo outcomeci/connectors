@@ -35,8 +35,8 @@ Each provider package owns everything about its provider:
   header a key goes in. A workflow names only a credential
   (`auth: secrets.github`), and the runtime takes the method from that
   credential. Slack accepts a bot token, or a refresh token for an app with
-  token rotation; GitHub accepts a personal access token, or a GitHub App
-  installation.
+  token rotation; GitHub accepts a personal access token, a GitHub App
+  installation, or an authorized OAuth account.
 - **Grant vocabulary:** which arguments a grant may scope, such as a Slack
   `channel` or `thread_ts`, or a GitHub `repo`, and the requests an operation
   refuses whatever the grant. A grant pins an input field, bounds a request
@@ -157,3 +157,45 @@ nothing. The workflow tests, builds with `python -m build` (hatch-vcs reads the
 version from the tag), publishes to PyPI through trusted publishing with no
 stored token, pushes the tag and creates a GitHub release with generated
 notes. Pushing a `vX.Y.Z` tag by hand releases that exact version the same way.
+
+## GitHub account authorization
+
+In Vault, choose **Add connection → GitHub → Authorize account**. Register a
+GitHub.com OAuth app with the exact callback URL shown in the form, then enter
+its client ID and client secret. PAT and GitHub App installation remain separate
+options.
+
+The OAuth flow uses PKCE S256 and requests `repo` plus `offline_access`. `repo`
+gives repository access as the authorizing user; use a fine-grained PAT or GitHub
+App installation when narrower provider permissions are needed. Workflow grants
+still restrict what each step can do. `offline_access` requests expiring access
+tokens and rotating refresh tokens. Vault stores the client secret and refresh
+token encrypted, and the runner persists refresh-token rotation before using a
+new access token. Reconnect repeats authorization while keeping the Vault path
+and workflow grants.
+
+This targets GitHub.com. Older GitHub Enterprise Server releases may not support
+PKCE or expiring OAuth tokens. Authorization is rejected if a refresh token or
+the required repository scope is missing.
+
+Roll out the updated connector, API OAuth exchange, and CLI runner together:
+the API discovers this option from its installed connector package, and both
+the authorization exchange and runner refresh request JSON from GitHub.
+
+Reference: [GitHub OAuth authorization](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
+
+
+### Slack app installation
+
+The Slack connector supports a bot token or interactive app installation through
+Vault. For installation, enable PKCE and token rotation in the Slack app’s OAuth
+settings, register Vault’s public HTTPS callback, and provide the app’s client ID
+and secret. Localhost redirects cannot request bot scopes with PKCE. Enabling
+PKCE is a one-way Slack setting; its refresh tokens expire after 30 days.
+See [Slack’s PKCE documentation](https://docs.slack.dev/authentication/using-pkce/).
+
+Installation requests the bot permissions used by the connector’s operations.
+Vault stores the encrypted refresh token and app secret; the runner refreshes
+access tokens and persists replacement refresh tokens. Event subscriptions and
+the signing secret still require the separate Slack trigger setup. Deploy the
+connector, API, runner, and web changes together to expose Install app in Vault.

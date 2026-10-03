@@ -7,6 +7,7 @@ from typing import Any
 from ...provider import Download, Grantable, OAuth2, Operation, Provider, Token, Watcher
 from .messages import HUMAN_SUBTYPES, files
 from .receiver import RECEIVER
+from .scopes import OPERATION_SCOPES
 
 CHANNEL = Grantable(field="channel")
 THREAD = Grantable(field="thread_ts")
@@ -63,11 +64,14 @@ AUTH = (
     Token(description="A Slack bot token (xoxb-), sent as a bearer token."),
     OAuth2(
         token_url="https://slack.com/api/oauth.v2.access",
+        authorization_url="https://slack.com/oauth/v2/authorize",
+        pkce=True,
+        scopes=OPERATION_SCOPES,
         grant_types=("refresh_token",),
         client_auth="basic",
         rotates_refresh_token=True,
         description=(
-            "A Slack app with token rotation: its client id and secret and a refresh "
+            "Install a Slack app with PKCE and token rotation enabled, or supply a refresh "
             "token, exchanged for a 12-hour bot token."
         ),
     ),

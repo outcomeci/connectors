@@ -54,7 +54,9 @@ def test_slack_accepts_a_bot_token_and_a_rotating_refresh_token():
         "credential": ["client_id", "client_secret", "refresh_token"],
         "token_url": "https://slack.com/api/oauth.v2.access",
         "grant_types": ["refresh_token"],
-        "scopes": [],
+        "scopes": list(slack.OPERATION_SCOPES),
+        "authorization_url": "https://slack.com/oauth/v2/authorize",
+        "pkce": True,
         "audience": None,
         "client_auth": "basic",
         "rotates_refresh_token": True,
@@ -62,7 +64,14 @@ def test_slack_accepts_a_bot_token_and_a_rotating_refresh_token():
 
 
 def test_github_accepts_a_token_and_an_app_installation():
-    token, app = github.PROVIDER.contract()["auth"]["accepts"]
+    token, app, oauth = github.PROVIDER.contract()["auth"]["accepts"]
+    assert oauth["authorization_url"] == "https://github.com/login/oauth/authorize"
+    assert oauth["token_url"] == "https://github.com/login/oauth/access_token"
+    assert oauth["pkce"] is True
+    assert oauth["client_auth"] == "body"
+    assert oauth["grant_types"] == ["refresh_token"]
+    assert oauth["scopes"] == ["repo", "offline_access"]
+    assert oauth["rotates_refresh_token"] is True
     assert token["kind"] == "token"
     assert app["kind"] == "app_installation"
     assert app["token_url"] == (
