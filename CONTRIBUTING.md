@@ -306,8 +306,11 @@ Rules for auth:
 - For interactive account connection, declare `authorization_url` alongside
   a `refresh_token` grant. The runtime runs authorization-code consent once,
   then uses the existing unattended refresh grant. Interactive authorization
-  always uses PKCE S256 (`pkce=True`, also the default when a URL is declared).
-  `pkce=False` is rejected. These fields are omitted from the contract when
+  defaults to PKCE S256 (`pkce=True`). Confidential providers whose documented
+  web flow does not support PKCE may explicitly declare `pkce=False`; state
+  protection and client-secret authentication remain required. Declare selectable
+  permissions in `optional_scopes`; clients validate the selected subset and
+  save it in credential configuration. These fields are omitted from the contract when
   interactive authorization is not declared, preserving existing digests.
   The runtime owns callback URLs, state, verifier generation, encrypted
   credential storage and token refresh; provider code remains pure data.

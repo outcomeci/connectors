@@ -23,6 +23,7 @@ outcomeci_connectors/
       receiver.py      # signed Events API requests to a workflow trigger
       setup.py         # app manifest, Slack CLI setup and status
     github.py          # PROVIDER: read, search and write, scoped by repo
+    linkedin.py        # PROVIDER: OAuth with selectable approved app scopes
     x.py               # PROVIDER: recent-post search and user-authorized text publishing
 ```
 
@@ -284,3 +285,22 @@ References: [GA4 quickstart](https://developers.google.com/analytics/devguides/r
 [report API](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport),
 [OAuth](https://developers.google.com/identity/protocols/oauth2/web-server), and
 [service accounts](https://developers.google.com/identity/protocols/oauth2/service-account).
+
+## LinkedIn account authorization
+
+Use your own LinkedIn developer app's client ID and secret. Register the callback
+URL shown by your client. Choose only scopes listed in your app's Auth tab;
+all twelve Community Management scopes are available in the connector's
+`auth.accepts[].optional_scopes`. None are requested automatically. Clients must
+request at least one, persist the chosen subset in the credential's `scopes`,
+and verify the consent response grants that subset. Required `scopes` on other
+providers remain unchanged. The CLI's existing OAuth broker uses the credential's
+configured scopes when the provider has no fixed scopes.
+
+This connector establishes OAuth credentials only; it does not yet expose
+LinkedIn API operations. It uses LinkedIn's confidential-client web flow with
+client-secret authentication and state protection, without PKCE. LinkedIn's
+separate native-PKCE flow is not used. Programmatic refresh-token access requires
+LinkedIn approval; Community Management scope approval alone does not prove it.
+Apps without refresh-token access cannot use this unattended connection flow.
+Refresh tokens expire on LinkedIn's schedule and require reauthorization.

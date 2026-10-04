@@ -172,8 +172,9 @@ def test_interactive_oauth_is_optional_and_requires_refresh_and_secure_pkce():
         OAuth2(token_url="https://p.test/token", authorization_url="https://p.test/authorize")
     with pytest.raises(ValueError, match="authorization_url"):
         dataclasses.replace(base, pkce=True)
-    for bad_pkce in (False, "S256", 1):
-        with pytest.raises(ValueError, match="pkce=True"):
+    assert dataclasses.replace(connected, pkce=False).contract()["pkce"] is False
+    for bad_pkce in ("S256", 1):
+        with pytest.raises(ValueError, match="pkce must be a boolean"):
             dataclasses.replace(connected, pkce=bad_pkce)
 
 

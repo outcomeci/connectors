@@ -122,8 +122,9 @@ class OAuth2:
     credential before anything else uses it.
 
     `authorization_url` opts into the runtime's shared interactive account
-    connection flow. It requires a refresh grant and PKCE S256; `pkce` defaults
-    to true for interactive connections. Unset metadata is omitted so existing
+    connection flow. It requires a refresh grant; `pkce` defaults
+    to true for interactive connections. Confidential clients may explicitly disable
+    PKCE when the provider does not support it. Unset metadata is omitted so existing
     provider contracts and digests do not change.
     """
 
@@ -131,6 +132,7 @@ class OAuth2:
     token_url: str
     grant_types: tuple[str, ...] = ("client_credentials",)
     scopes: tuple[str, ...] = ()
+    optional_scopes: tuple[str, ...] = ()
     audience: str | None = None
     client_auth: str = "basic"
     rotates_refresh_token: bool = False
@@ -164,8 +166,19 @@ class OAuth2:
                 raise ValueError("interactive authorization requires a refresh_token grant")
         elif self.pkce is not None:
             raise ValueError("pkce requires authorization_url")
-        if self.pkce is not None and self.pkce is not True:
-            raise ValueError("interactive authorization requires pkce=True (S256)")
+        if self.pkce is not None and type(self.pkce) is not bool:
+            raise ValueError("pkce must be a boolean")
+        if self.optional_scopes:
+            if not self.authorization_url:
+                raise ValueError("optional_scopes requires authorization_url")
+            if (
+                len(set(self.optional_scopes)) != len(self.optional_scopes)
+                or set(self.optional_scopes) & set(self.scopes)
+                or any(
+                    not scope or any(c.isspace() for c in scope) for scope in self.optional_scopes
+                )
+            ):
+                raise ValueError("optional_scopes must be unique scope names disjoint from scopes")
 
     def contract(self) -> dict[str, Any]:
         credential = ["client_id", "client_secret"]
@@ -178,6 +191,7 @@ class OAuth2:
             "token_url": self.token_url,
             "grant_types": list(self.grant_types),
             "scopes": list(self.scopes),
+            **({"optional_scopes": list(self.optional_scopes)} if self.optional_scopes else {}),
             "audience": self.audience,
             "client_auth": self.client_auth,
             "rotates_refresh_token": self.rotates_refresh_token,

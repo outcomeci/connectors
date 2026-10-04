@@ -16,6 +16,7 @@ slack = "outcomeci_connectors.providers.slack:PROVIDER"
 "google.analytics" = "outcomeci_connectors.providers.google.analytics:PROVIDER"
 github = "outcomeci_connectors.providers.github:PROVIDER"
 x = "outcomeci_connectors.providers.x:PROVIDER"
+linkedin = "outcomeci_connectors.providers.linkedin:PROVIDER"
 
 [project.optional-dependencies]
 test = ["pytest>=8.3", "ruff>=0.13", "jsonschema>=4.23"]
