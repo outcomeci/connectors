@@ -13,6 +13,8 @@ from ..provider import (
     QueryQualifier,
     Token,
 )
+from ..setup import SetupCredential
+from .github_receiver import RECEIVER
 
 REPO = Grantable(path_prefix="/repos/{owner}/{name}", value_fields=("owner", "name"))
 
@@ -111,6 +113,19 @@ AUTH = (
 
 PROVIDER = Provider(
     name="github",
+    receiver=RECEIVER,
+    setup_credentials=(
+        SetupCredential(
+            id="webhook_secret",
+            label="Webhook secret",
+            description=(
+                "Use the same secret configured in your GitHub App or repository webhook. "
+                "Verifies incoming GitHub events; not needed for outbound API calls. "
+                "Configure the webhook URL and event subscriptions separately in GitHub."
+            ),
+            suggested_path="github/webhook-secret",
+        ),
+    ),
     base_url="https://api.github.com",
     auth=AUTH,
     operations={
