@@ -19,7 +19,7 @@ def test_slack_setup_is_discoverable_without_api_or_ui():
     assert [method["kind"] for method in contract["auth"]["accepts"]] == ["token", "oauth2"]
     assert "value" not in secret
     assert SLACK.digest() != dataclasses.replace(SLACK, setup_credentials=()).digest()
-    assert "setup" not in GITHUB.contract()
+    assert GITHUB.contract()["setup"]["credentials"][0]["id"] == "webhook_secret"
 
 
 @pytest.mark.parametrize("path", ["/absolute", "../escape", "slack//secret"])
@@ -31,6 +31,6 @@ def test_setup_paths_are_relative(path):
 def test_setup_requires_a_receiver_and_unique_ids():
     secret = SLACK.setup_credentials[0]
     with pytest.raises(ValueError, match="receiver"):
-        dataclasses.replace(GITHUB, setup_credentials=(secret,))
+        dataclasses.replace(GITHUB, receiver=None, setup_credentials=(secret,))
     with pytest.raises(ValueError, match="unique"):
         dataclasses.replace(SLACK, setup_credentials=(secret, secret))

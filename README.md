@@ -309,3 +309,51 @@ separate native-PKCE flow is not used. Programmatic refresh-token access require
 LinkedIn approval; Community Management scope approval alone does not prove it.
 Apps without refresh-token access cannot use this unattended connection flow.
 Refresh tokens expire on LinkedIn's schedule and require reauthorization.
+
+## GitHub webhook triggers
+
+GitHub App and repository webhooks can use the same verified receiver:
+
+```yaml
+trigger:
+  webhook:
+    uses: github
+    auth: secrets.github_webhook
+    events: [issues, issue_comment, pull_request]
+
+secrets:
+  github_webhook: vault:github/webhook-secret
+```
+
+Save the webhook secret as a plain Vault value and grant it to the workflow.
+Use the identical secret in GitHub's webhook settings, set the payload format
+to JSON for repository webhooks, and point the webhook URL at the workflow's
+production webhook URL. Subscribe to the matching events in GitHub; install
+GitHub Apps on the repositories you want to receive events from. This secret
+is separate from an API token or GitHub App private key. The connector's setup
+metadata exposes it to clients without requiring the OutcomeCI UI.
+
+The receiver verifies `X-Hub-Signature-256` against the original body bytes
+before parsing or accepting any event, including pings. Signed pings are
+acknowledged without starting a run. Supported events are `push`, `issues`,
+`issue_comment`, `pull_request`, `pull_request_review`,
+`pull_request_review_comment`, `check_run`, `check_suite`, `workflow_run`, and
+`release`. All actions within a selected event are delivered; inspect
+`trigger.payload.action` in the workflow when only certain actions matter.
+
+The trigger contains `event`, `delivery_id`, and `payload` (the original JSON
+object). For example, use `trigger.payload.repository.full_name` for the
+repository and `trigger.payload.issue.number` for an issue. This differs from
+an unverified generic webhook's `body_base64` envelope; update workflows when
+switching their trigger to this receiver.
+
+The runtime deduplicates redeliveries using `X-GitHub-Delivery`. GitHub does not
+sign a timestamp or its event/delivery headers, so this does not provide
+Slack's five-minute freshness check or prevent replays with altered headers.
+Keep the webhook URL private. Outbound GitHub API credentials still need their
+own workflow grants.
+
+After deploying a release containing this receiver to the API and runtime,
+recompile and sync the workflow so its pinned connector contract includes it.
+Test a matching event in GitHub and check both Recent deliveries and the
+OutcomeCI run. A successful webhook response confirms receipt, not completion.
