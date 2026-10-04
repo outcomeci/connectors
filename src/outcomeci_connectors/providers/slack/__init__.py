@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...provider import Download, Grantable, OAuth2, Operation, Provider, Token, Watcher
+from ...setup import SetupCredential
 from .messages import HUMAN_SUBTYPES, files
 from .receiver import RECEIVER
 from .scopes import OPERATION_SCOPES
@@ -79,6 +80,18 @@ AUTH = (
 
 PROVIDER = Provider(
     name="slack",
+    setup_credentials=(
+        SetupCredential(
+            id="signing_secret",
+            label="Signing secret",
+            description=(
+                "Find this in your Slack app’s Basic Information → App Credentials. "
+                "Verifies incoming Slack events; not needed for outbound API calls. "
+                "Configure event subscriptions separately in Slack."
+            ),
+            suggested_path="slack/signing-secret",
+        ),
+    ),
     base_url="https://slack.com",
     auth=AUTH,
     operations={

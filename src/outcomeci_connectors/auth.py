@@ -14,7 +14,7 @@ by the provider and takes precedence over the credential's configuration.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 GRANT_TYPES = {"client_credentials", "refresh_token"}
@@ -137,6 +137,7 @@ class OAuth2:
     description: str = ""
     authorization_url: str | None = None
     pkce: bool | None = None
+    authorization_parameters: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _https(self.token_url, "token_url")
@@ -146,6 +147,17 @@ class OAuth2:
             raise ValueError(f"client_auth is one of {sorted(CLIENT_AUTH)}")
         if self.rotates_refresh_token and "refresh_token" not in self.grant_types:
             raise ValueError("only a refresh_token grant rotates its refresh token")
+        if self.authorization_parameters:
+            if not self.authorization_url or set(self.authorization_parameters) - {
+                "access_type",
+                "prompt",
+                "include_granted_scopes",
+            }:
+                raise ValueError("unsupported authorization parameters")
+            if not all(
+                isinstance(value, str) and value for value in self.authorization_parameters.values()
+            ):
+                raise ValueError("authorization parameters require nonempty strings")
         if self.authorization_url is not None:
             _https(self.authorization_url, "authorization_url")
             if "refresh_token" not in self.grant_types:
@@ -169,6 +181,11 @@ class OAuth2:
             "audience": self.audience,
             "client_auth": self.client_auth,
             "rotates_refresh_token": self.rotates_refresh_token,
+            **(
+                {"authorization_parameters": dict(self.authorization_parameters)}
+                if self.authorization_parameters
+                else {}
+            ),
             **(
                 {
                     "authorization_url": self.authorization_url,
@@ -235,6 +252,7 @@ class JwtBearer:
     audience: str | None = None
     scopes: tuple[str, ...] = ()
     description: str = ""
+    subject_required: bool = True
 
     def __post_init__(self) -> None:
         _https(self.token_url, "token_url")
@@ -243,7 +261,11 @@ class JwtBearer:
         return {
             "kind": self.kind,
             "description": self.description,
-            "credential": ["issuer", "subject", "private_key"],
+            "credential": [
+                "issuer",
+                *(["subject"] if self.subject_required else []),
+                "private_key",
+            ],
             "token_url": self.token_url,
             "audience": self.audience,
             "scopes": list(self.scopes),

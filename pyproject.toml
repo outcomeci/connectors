@@ -13,6 +13,7 @@ dependencies = []
 
 [project.entry-points."outcomeci.connectors"]
 slack = "outcomeci_connectors.providers.slack:PROVIDER"
+"google.analytics" = "outcomeci_connectors.providers.google.analytics:PROVIDER"
 github = "outcomeci_connectors.providers.github:PROVIDER"
 x = "outcomeci_connectors.providers.x:PROVIDER"
 

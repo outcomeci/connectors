@@ -199,3 +199,88 @@ Vault stores the encrypted refresh token and app secret; the runner refreshes
 access tokens and persists replacement refresh tokens. Event subscriptions and
 the signing secret still require the separate Slack trigger setup. Deploy the
 connector, API, runner, and web changes together to expose Install app in Vault.
+
+### Discovering setup credentials
+
+`Provider.contract()` includes optional `setup.credentials` metadata for secrets
+used by receivers, independently of the API authentication choices. These are
+plain secret values, stored separately from bot tokens or OAuth credentials.
+`required` applies only when using `used_by` (currently `receiver`); it does not
+make event setup a prerequisite for outbound API calls. `suggested_path` is a
+customizable default so multiple app connections can use separate paths.
+
+No OutcomeCI web app or API is needed to inspect the declaration:
+
+```python
+from outcomeci_connectors.providers.slack import PROVIDER
+
+for credential in PROVIDER.contract().get("setup", {}).get("credentials", []):
+    print(credential["label"], credential["description"], credential["suggested_path"])
+```
+
+Use the existing local Vault commands to save the value interactively:
+
+```sh
+oci vault local init  # once per repository
+oci vault local put slack/signing-secret
+```
+
+Reference `vault:slack/signing-secret` in the workflow's receiver binding. Any
+other client or secret store can consume the same JSON declaration. It contains
+metadata only, never credential values, and does not install event subscriptions.
+
+### Google Analytics module
+
+Bind `uses: google.analytics` to a Vault credential. Google modules share auth
+helpers but declare their own API origin and scopes; Analytics is the first
+module. It uses the GA4 Data API, not Universal Analytics or the Admin API.
+
+```yaml
+apiVersion: outcomeci.workflow/v1
+trigger: manual
+secrets:
+  google: vault:google/analytics
+apis:
+  analytics: {uses: google.analytics, auth: secrets.google}
+steps:
+  - summarize:
+      reason: Summarize active users over the last seven days.
+      can:
+        - analytics.report: {property: "123456789"}
+        - analytics.metadata: {property: "123456789"}
+```
+
+Operations are `report`, `realtime`, and `metadata`. Reports take a `report`
+object containing metrics, optional dimensions, and an explicit string `limit`
+(up to `"10000"`). Historical reports also require `dateRanges` and support a
+string `offset` for pagination. This initial module exposes basic reports and
+metadata, not filters, pivots, cohorts, administration, or property discovery.
+Property IDs are numeric strings; the runtime enforces each property grant.
+
+Enable the Google Analytics Data API in your Cloud project. Either authenticate
+as a user with property access, or add a service account’s email to the GA4
+property with Viewer access. Only `analytics.readonly` is requested.
+
+- **OAuth:** use a web OAuth client with the callback shown by Vault. The
+  declaration requests offline access and consent so a refresh token is issued.
+  For headless/local use, obtain a refresh token through your own OAuth client,
+  then store `client_secret` and `refresh_token` as an `oauth2` credential with
+  `client_id` and `grant_type=refresh_token`. No OutcomeCI API is needed to use it.
+- **Service account:** upload the downloaded JSON key in Vault, or use the
+  existing local Vault command with the email as `issuer` and the private key:
+
+```sh
+jq -r '.private_key' service-account.json |
+  oci vault local put google/analytics --credential-type jwt_bearer \
+    --issuer service-account@project.iam.gserviceaccount.com --value-stdin
+```
+
+The connector fixes the token endpoint and scope. Google service accounts do
+not require a subject or domain-wide delegation for access to a GA4 property.
+The runtime signs an RS256 assertion, exchanges it for an access token, and
+caches the token; OAuth credentials use the existing refresh flow.
+
+References: [GA4 quickstart](https://developers.google.com/analytics/devguides/reporting/data/v1/quickstart),
+[report API](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport),
+[OAuth](https://developers.google.com/identity/protocols/oauth2/web-server), and
+[service accounts](https://developers.google.com/identity/protocols/oauth2/service-account).
