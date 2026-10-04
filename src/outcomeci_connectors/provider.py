@@ -37,6 +37,7 @@ from .auth import (
     auth_contract,
     check_accepts,
 )
+from .setup import SetupCredential
 
 __all__ = [
     "CONTRACT_VERSION",
@@ -57,6 +58,7 @@ __all__ = [
     "QueryQualifier",
     "Reception",
     "Receiver",
+    "SetupCredential",
     "Token",
     "Watcher",
 ]
@@ -421,9 +423,14 @@ class Provider:
     max_requests: int = 50
     watchers: Mapping[str, Watcher] = field(default_factory=dict)
     receiver: Receiver | None = None
+    setup_credentials: tuple[SetupCredential, ...] = ()
 
     def __post_init__(self) -> None:
         check_accepts(self.auth)
+        if len({item.id for item in self.setup_credentials}) != len(self.setup_credentials):
+            raise ValueError("setup credential ids must be unique")
+        if self.setup_credentials and self.receiver is None:
+            raise ValueError("receiver setup credentials require a receiver")
         for name, watcher in self.watchers.items():
             if watcher.operation not in self.operations:
                 raise ValueError(f"watcher {name} reads unknown operation {watcher.operation}")
@@ -441,6 +448,11 @@ class Provider:
 
     def contract(self) -> dict[str, Any]:
         return {
+            **(
+                {"setup": {"credentials": [item.contract() for item in self.setup_credentials]}}
+                if self.setup_credentials
+                else {}
+            ),
             "schema_version": CONTRACT_VERSION,
             "name": self.name,
             "base_url": self.base_url,
