@@ -1,0 +1,55 @@
+name: Connector request
+description: Request a service or new capabilities for an existing connector.
+title: "[Connector request]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what you want to connect and what you want to get done. Technical details are optional.
+        Requests are public. Please leave out tokens, credentials, and private account data.
+  - type: input
+    id: service
+    attributes:
+      label: Service
+      description: Name the service or product you want to connect.
+      placeholder: "Example: Linear"
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What do you want to get done?
+      description: Describe the workflow, including what starts it and what should happen.
+      placeholder: "When a customer reports a bug in Slack, create a Linear issue and post updates back to the thread."
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Needed capabilities
+      description: Optional. List specific actions, data to read, or events to listen for. Requests for existing connectors are welcome too.
+      placeholder: "Create issues, read their status, and react when they are resolved."
+  - type: input
+    id: documentation
+    attributes:
+      label: Service or API documentation
+      description: Optional. A link to the product or its developer documentation.
+      placeholder: "https://..."
+  - type: dropdown
+    id: authentication
+    attributes:
+      label: Authentication
+      description: Optional. Select any methods you need, if known.
+      multiple: true
+      options:
+        - Not sure
+        - OAuth / connect account
+        - API key or personal access token
+        - Service account
+        - App installation
+        - Other (describe below)
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Optional. Share access requirements, current workarounds, or other details that would help.

@@ -10,6 +10,11 @@ broker, which journals it. An `outcomeci.workflow/v1` workflow names a provider
 with `uses:`, and the cli finds installed providers through the
 `outcomeci.connectors` entry point group.
 
+## Request a connector
+
+Missing a service or an operation? [Request a connector](https://github.com/outcomeci/connectors/issues/new?template=connector-request.yml)
+and tell us what you want your workflow to do.
+
 ## Layout
 
 ```
