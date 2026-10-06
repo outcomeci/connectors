@@ -126,6 +126,10 @@ class OAuth2:
     to true for interactive connections. Confidential clients may explicitly disable
     PKCE when the provider does not support it. Unset metadata is omitted so existing
     provider contracts and digests do not change.
+
+    `scope_separator` controls outbound scope serialization, not token response
+    parsing. Space is the default; providers such as Linear and Slack declare
+    comma. The default is omitted from the contract to preserve existing digests.
     """
 
     kind: ClassVar[str] = "oauth2"
@@ -140,9 +144,12 @@ class OAuth2:
     authorization_url: str | None = None
     pkce: bool | None = None
     authorization_parameters: dict[str, str] = field(default_factory=dict)
+    scope_separator: str = " "
 
     def __post_init__(self) -> None:
         _https(self.token_url, "token_url")
+        if self.scope_separator not in (" ", ","):
+            raise ValueError("scope_separator must be a space or comma")
         if not self.grant_types or set(self.grant_types) - GRANT_TYPES:
             raise ValueError(f"oauth2 grant types are one or more of {sorted(GRANT_TYPES)}")
         if self.client_auth not in CLIENT_AUTH:
@@ -191,6 +198,7 @@ class OAuth2:
             "token_url": self.token_url,
             "grant_types": list(self.grant_types),
             "scopes": list(self.scopes),
+            **({"scope_separator": self.scope_separator} if self.scope_separator != " " else {}),
             **({"optional_scopes": list(self.optional_scopes)} if self.optional_scopes else {}),
             "audience": self.audience,
             "client_auth": self.client_auth,

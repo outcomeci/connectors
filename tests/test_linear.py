@@ -43,6 +43,7 @@ def test_api_key_is_sent_bare_and_oauth_rotates_refresh_tokens():
         "pkce": True,
         "grant_types": ["refresh_token"],
         "scopes": ["read", "issues:create", "comments:create"],
+        "scope_separator": ",",
         "audience": None,
         "client_auth": "body",
         "rotates_refresh_token": True,

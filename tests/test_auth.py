@@ -55,12 +55,31 @@ def test_slack_accepts_a_bot_token_and_a_rotating_refresh_token():
         "token_url": "https://slack.com/api/oauth.v2.access",
         "grant_types": ["refresh_token"],
         "scopes": list(slack.OPERATION_SCOPES),
+        "scope_separator": ",",
         "authorization_url": "https://slack.com/oauth/v2/authorize",
         "pkce": True,
         "audience": None,
         "client_auth": "basic",
         "rotates_refresh_token": True,
     }
+
+
+def test_oauth_scope_separator_defaults_preserve_contract_and_digest():
+    default = OAuth2(token_url="https://p.test/token", scopes=("read", "write"))
+    explicit_space = dataclasses.replace(default, scope_separator=" ")
+    comma = dataclasses.replace(default, scope_separator=",")
+    assert "scope_separator" not in default.contract()
+    assert default.contract() == explicit_space.contract()
+    assert _provider(default).digest() == _provider(explicit_space).digest()
+    assert comma.contract()["scope_separator"] == ","
+    assert comma.contract()["scopes"] == ["read", "write"]
+    assert _provider(comma).digest() != _provider(default).digest()
+
+
+@pytest.mark.parametrize("separator", ["", ";", ", ", "\n", None, 1])
+def test_oauth_rejects_invalid_scope_separator(separator):
+    with pytest.raises(ValueError, match="scope_separator"):
+        OAuth2(token_url="https://p.test/token", scope_separator=separator)
 
 
 def test_github_accepts_a_token_and_an_app_installation():

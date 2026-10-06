@@ -141,6 +141,15 @@ References: [OAuth authorization](https://docs.x.com/fundamentals/authentication
 [confidential client exchange](https://docs.x.com/fundamentals/authentication/oauth-2-0/user-access-token),
 [publishing and reply restrictions](https://docs.x.com/x-api/posts/manage-tweets/introduction).
 
+### OAuth scope serialization
+
+OAuth scopes remain a list in every connector. `OAuth2.scope_separator` tells
+the API and CLI how to serialize outbound scope parameters: a space by default,
+or `","` for providers such as Linear and Slack. Token response scope parsing is
+separate. The default is omitted from the serialized contract, preserving other
+providers' contract digests. Declaring the comma separator changes Slack's digest;
+workflows locked to its previous contract need to be recompiled with this version.
+
 ## Adding a connector
 
 [CONTRIBUTING.md](CONTRIBUTING.md) is the authoring guide, for people and

@@ -68,6 +68,7 @@ AUTH = (
         authorization_url="https://slack.com/oauth/v2/authorize",
         pkce=True,
         scopes=OPERATION_SCOPES,
+        scope_separator=",",
         grant_types=("refresh_token",),
         client_auth="basic",
         rotates_refresh_token=True,
