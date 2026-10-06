@@ -28,6 +28,9 @@ outcomeci_connectors/
       receiver.py      # signed Events API requests to a workflow trigger
       setup.py         # app manifest, Slack CLI setup and status
     github.py          # PROVIDER: read, search and write, scoped by repo
+    linear/
+      __init__.py      # PROVIDER: create, read and search issues by team; comment on an issue
+      receiver.py      # signed webhooks: issue created, state changed, comment added
     linkedin.py        # PROVIDER: OAuth with selectable approved app scopes
     x.py               # PROVIDER: recent-post search and user-authorized text publishing
 ```
@@ -357,3 +360,83 @@ After deploying a release containing this receiver to the API and runtime,
 recompile and sync the workflow so its pinned connector contract includes it.
 Test a matching event in GitHub and check both Recent deliveries and the
 OutcomeCI run. A successful webhook response confirms receipt, not completion.
+
+## Linear issues and webhook triggers
+
+Bind `uses: linear` to a Vault credential. A personal API key (`lin_api_…`) is
+saved as an `api_key` credential and sent bare in `Authorization`, as Linear
+requires; a plain token value would be sent as `Bearer` and refused. For an
+OAuth app, choose **Add connection → Linear → Authorize account**, register the
+callback URL shown, and enter the app's client ID and secret. The flow uses
+PKCE S256 and requests `read`, `issues:create` and `comments:create`. Linear
+access tokens last about a day, and each refresh returns a new refresh token,
+which the runner stores before using the new access token.
+
+Every operation is a fixed GraphQL query or mutation sent to
+`https://api.linear.app/graphql`; the agent supplies only its variables.
+
+- `create_issue`: `team_id`, `title`, optional Markdown `description` and
+  `label_ids`. Returns `success`, `issue` (id, identifier, url, team, state,
+  assignee, labels) and `errors`.
+- `issue`: `team_id` and the issue's `id`. Returns `issues`, a list of at most
+  one issue with its current state, assignee and labels; empty when the issue
+  is not in the team.
+- `search_issues`: `team_id`, an optional Linear `filter` (such as
+  `{"state": {"type": {"eq": "started"}}}` or `{"number": {"eq": 123}}`), and
+  `first` (1–100, default 50) and `after` for paging. Returns `issues`,
+  `page_info` and `errors`.
+- `comment_issue`: `issue_id` and a Markdown `body`. Returns `success`,
+  `comment` (id and url) and `errors`.
+
+`create_issue`, `issue` and `search_issues` are granted by `team_id`, the
+team's UUID: the team is pinned in the mutation's input or ANDed with any
+filter the agent passes, so a grant cannot reach another team's issues.
+`commentCreate` names only an issue, so `comment_issue` is granted by
+`issue_id`. Linear returns GraphQL errors with HTTP 200; check `errors` before
+treating an empty result as no match.
+
+```yaml
+secrets:
+  linear: vault:linear/api-key
+apis:
+  linear: {uses: linear, auth: secrets.linear}
+# Within an agent step:
+# can:
+#   - linear.create_issue: {team_id: "<team uuid>"}
+#   - linear.search_issues: {team_id: "<team uuid>"}
+#   - linear.comment_issue: {issue_id: "<issue uuid>"}
+```
+
+Workflows can also trigger on Linear webhooks:
+
+```yaml
+trigger:
+  webhook:
+    uses: linear
+    auth: secrets.linear_webhook
+    events: [issue_created, issue_state_changed, comment_added]
+
+secrets:
+  linear_webhook: vault:linear/webhook-secret
+```
+
+Create the webhook in Linear (Settings → API → Webhooks) pointing at the
+workflow's webhook URL, subscribe it to the **Issues** and **Comments** resource
+types, and save its signing secret as a plain Vault value granted to the
+workflow. The secret is separate from API credentials.
+
+The receiver verifies `Linear-Signature`, the HMAC-SHA256 of the raw body,
+before parsing anything, and refuses a body whose `webhookTimestamp` is more
+than a minute from now. `issue_created` is an `Issue` `create`,
+`issue_state_changed` an `Issue` `update` whose `updatedFrom` has `stateId`,
+and `comment_added` a `Comment` `create`; other updates, removals and resource
+types are ignored. The trigger is `event` and `payload`, the original JSON
+object; for example `trigger.payload.data.identifier` and
+`trigger.payload.data.state.name`. Since Linear does not sign the
+`Linear-Delivery` header, redeliveries are deduplicated on the signed entity
+id, and for a state change its `updatedAt`.
+
+References: [GraphQL API](https://linear.app/developers/graphql),
+[OAuth](https://linear.app/developers/oauth-2-0-authentication),
+[filtering](https://linear.app/developers/filtering) and
+[webhooks](https://linear.app/developers/webhooks).
