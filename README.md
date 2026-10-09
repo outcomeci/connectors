@@ -33,6 +33,7 @@ outcomeci_connectors/
       receiver.py      # signed webhooks: issue created, state changed, comment added
     linkedin.py        # PROVIDER: OAuth with selectable approved app scopes
     x.py               # PROVIDER: recent-post search and user-authorized text publishing
+    tavily.py          # PROVIDER: bounded web search, domain grants and credit usage
 ```
 
 Each provider package owns everything about its provider:
@@ -76,6 +77,44 @@ accepted kind:
 {"kind": "token", "description": "...", "credential": ["value"],
  "header": "Authorization", "scheme": "Bearer"}
 ```
+
+## Tavily search
+
+Bind `uses: tavily` to a Tavily API key stored as either a Vault `token` or
+`api_key` credential. Both send `Authorization: Bearer <key>`. The connector
+uses the same contract for platform-managed credentials and your own key;
+credential selection, usage attribution and billing are runtime responsibilities.
+It does not select a platform credential or implement billing itself.
+
+Grant `tavily.search` with `topic`, `search_depth`, `include_domains`,
+`exclude_domains` or `max_results` to pin those inputs. Domain grants pin the
+whole list, not an arbitrary subset. Each call requires `query` (1–4000
+characters), `max_results` (1–20), `topic` (`general`, `news`, `finance`),
+`search_depth` (`basic`, `advanced`, `fast`, `ultra-fast`), and both domain
+lists. Use empty lists for unrestricted sources. Domains must be hostnames;
+include/exclude lists are limited to 300/150 entries respectively.
+
+```yaml
+secrets:
+  tavily: vault:tavily/api-key
+apis:
+  search: {uses: tavily, auth: secrets.tavily}
+# Within an agent step:
+# can:
+#   - search.search: {topic: general, search_depth: basic, max_results: 5}
+```
+
+The response exposes `query`, `results` (including source titles, URLs,
+content and scores), `usage`, `request_id` and `response_time`. Every request
+asks Tavily for usage; runtime metering should use `usage.credits` and retain
+`request_id` for reconciliation. Missing usage is unknown, not zero.
+Advanced search uses two credits; other depths use one. Automatic parameter
+selection is disabled so it cannot silently increase search depth. The initial
+connector provides search only, with no generated answers, raw-page retrieval,
+crawl or extract. Domain inclusion uses Tavily's default restrictive mode;
+the caller cannot change it to merely prefer the selected domains.
+
+Reference: [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search).
 
 ## X search and publishing
 
