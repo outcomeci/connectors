@@ -27,6 +27,10 @@ outcomeci_connectors/
       messages.py      # the files and subtypes a message carries
       receiver.py      # signed Events API requests to a workflow trigger
       setup.py         # app manifest, Slack CLI setup and status
+    google/
+      auth.py          # shared OAuth, service-account and bearer authentication
+      analytics.py     # google.analytics: property-scoped GA4 reports
+      drive.py         # google.drive: file reads, exports and bounded metadata writes
     github.py          # PROVIDER: read, search and write, scoped by repo
     linear/
       __init__.py      # PROVIDER: create, read and search issues by team; comment on an issue
@@ -289,8 +293,7 @@ metadata only, never credential values, and does not install event subscriptions
 ### Google Analytics module
 
 Bind `uses: google.analytics` to a Vault credential. Google modules share auth
-helpers but declare their own API origin and scopes; Analytics is the first
-module. It uses the GA4 Data API, not Universal Analytics or the Admin API.
+helpers but declare their own API origin and scopes. It uses the GA4 Data API, not Universal Analytics or the Admin API.
 
 ```yaml
 apiVersion: outcomeci.workflow/v1
@@ -318,6 +321,9 @@ Enable the Google Analytics Data API in your Cloud project. Either authenticate
 as a user with property access, or add a service account’s email to the GA4
 property with Viewer access. Only `analytics.readonly` is requested.
 
+- **Managed Google connection:** select Analytics in the Google Add Vault form.
+  OutcomeCI requests workflow permission separately from account sign-in and
+  supplies short-lived bearer credentials to the runner.
 - **OAuth:** use a web OAuth client with the callback shown by Vault. The
   declaration requests offline access and consent so a refresh token is issued.
   For headless/local use, obtain a refresh token through your own OAuth client,
@@ -341,6 +347,78 @@ References: [GA4 quickstart](https://developers.google.com/analytics/devguides/r
 [report API](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport),
 [OAuth](https://developers.google.com/identity/protocols/oauth2/web-server), and
 [service accounts](https://developers.google.com/identity/protocols/oauth2/service-account).
+
+### Google Drive module
+
+Drive and Analytics appear under Google in Add Vault. Add multiple independent
+Google credentials as needed for different accounts or workflow permissions. Bind `uses: google.drive`
+to a Google connection with the needed Drive permissions. Signing in with
+Google alone does not grant workflow access to Drive or Analytics. The managed
+connection keeps refresh credentials in the API and gives the runner a
+short-lived bearer lease. Existing OAuth and service-account credentials are
+also supported.
+
+```yaml
+apiVersion: outcomeci.workflow/v1
+trigger: manual
+secrets:
+  google: vault:google/workflows
+apis:
+  drive: {uses: google.drive, auth: secrets.google}
+steps:
+  - inspect:
+      reason: Inspect documents directly inside the approved folder.
+      can:
+        - drive.files.list: {folder_id: "example_folder"}
+        - drive.files.get: {folder_id: "example_folder"}
+        - drive.files.download: {folder_id: "example_folder"}
+        - drive.files.export: {folder_id: "example_folder"}
+```
+
+| Operation | Input and limits |
+|---|---|
+| `files.list` | `folder_id`, `page_size` (1–100), `page_token` (empty for the first page). Lists non-trashed direct children; use `next_page_token` to continue. |
+| `files.get` | `file_id`. Returns metadata without content or permission lists. |
+| `files.download` | `file_id`. Downloads a binary file as a local artifact, up to 20 MiB. |
+| `files.export` | `file_id`, `mime_type`. Exports a Google Workspace document, up to 10 MiB; supported output formats depend on the source type. |
+| `folders.create` | `folder_id`, `name`, `description` (may be empty). Creates a folder inside the granted parent. |
+| `files.update` | `file_id`, `metadata` containing `name`, `description`, or both. Changes metadata only. |
+
+Read operations accept a specific `file_id` grant or a `folder_id` grant that
+checks direct parent membership before returning metadata or downloading.
+Folder creation requires a parent-folder grant; updates require a file grant.
+There is no arbitrary HTTP request, recursive search, upload, content replacement,
+move, trash, delete, sharing or permission-management operation. Shared-drive
+items are supported when the connected account has access. Downloads use the
+provider origin and do not follow redirects or bypass Google's abuse warnings.
+
+Choose **Drive read** (`drive.readonly`) to inspect existing files and download
+or export their content. Add **Drive app files** (`drive.file`) for folder
+creation and metadata changes to files authorized for the OAuth app. That
+permission does not make every existing file writable: the app must have
+created the item or the user must have explicitly opened it with the app.
+Entering a file or folder ID is not Google authorization for that item.
+The connector does not include a Google Picker UI.
+
+Bring-your-own OAuth defaults to read access with optional `drive.file`;
+service-account declarations include both scopes. Service accounts still need
+access to the target files. Enable the Drive API in the Google Cloud project.
+`drive.readonly` is a restricted Google scope, so external production apps must
+meet Google's verification requirements. Google returns permission errors when
+a credential lacks the scope or resource access an operation requires.
+
+Drive's content download contract requires a runner that supports same-origin
+`Download.path` and `Download.query`; older runners reject that contract. Adding
+bearer authentication changes the `google.analytics` contract digest, so workflows
+that lock the previous digest must refresh their connector lock. Existing OAuth
+and service-account fields and defaults for Analytics are unchanged.
+
+References: [Drive scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth),
+[file list](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list),
+[file reads](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/get),
+[export formats](https://developers.google.com/workspace/drive/api/guides/ref-export-formats),
+[folder creation](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/create),
+and [metadata updates](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/update).
 
 ## LinkedIn account authorization
 

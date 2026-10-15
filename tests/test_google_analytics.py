@@ -10,7 +10,9 @@ def test_google_analytics_auth_and_origin():
     contract = PROVIDER.contract()
     assert contract["name"] == "google.analytics"
     assert contract["base_url"] == "https://analyticsdata.googleapis.com"
-    oauth, service = contract["auth"]["accepts"]
+    oauth, service, token = contract["auth"]["accepts"]
+    assert token["kind"] == "token"
+    assert token["scheme"] == "Bearer"
     assert oauth["kind"] == "oauth2"
     assert oauth["authorization_parameters"] == {"access_type": "offline", "prompt": "consent"}
     assert oauth["pkce"] is True

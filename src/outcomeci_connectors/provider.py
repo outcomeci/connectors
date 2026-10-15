@@ -159,23 +159,55 @@ class Download:
     """The file a response points to, fetched with the same credential and saved
     where the agent can open it.
 
-    `url`, `name` and `content_type` are response paths. The runtime fetches
-    only an https URL on one of `hosts`, and at most `max_bytes`.
+    `url`, `name` and `content_type` are response paths. Alternatively, `path`
+    and `query` template a same-origin GET using validated input, after the
+    metadata response passes its grant checks. In that mode `content_type`
+    can read an input path (an export format). The runtime fetches only an
+    https URL on one of `hosts`, and at most `max_bytes`.
     """
 
-    url: str
+    url: str | None
     hosts: tuple[str, ...]
     name: str
     content_type: str
     max_bytes: int = 20 * 1024 * 1024
+    path: str | None = None
+    query: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        if not self.hosts or self.max_bytes < 1:
-            raise ValueError("a download names at least one host and a positive size limit")
+        if not self.hosts or not 0 < self.max_bytes <= 100 * 1024 * 1024:
+            raise ValueError("a download names at least one host and a size limit up to 100 MiB")
+        if (self.url is None) == (self.path is None):
+            raise ValueError("a download names exactly one response URL or request path")
+        if self.path is None:
+            if self.query is not None:
+                raise ValueError("download query requires a request path")
+        else:
+            # This path is rendered only against validated input. Runtime additionally
+            # enforces the provider origin, host allowlist and refuses redirects.
+            if not self.path.startswith("/") or self.path.startswith("//"):
+                raise ValueError("download path must be relative to the provider origin")
+            if any(char in self.path for char in ("?", "#", "\\")):
+                raise ValueError("download path must not contain query, fragment or backslash")
+            rendered = re.sub(r"{{\s*input\.[a-z][a-z0-9_]*\s*}}", "value", self.path)
+            if "{" in rendered or "}" in rendered or ".." in rendered.split("/"):
+                raise ValueError("download path supports simple input templates only")
+            if not self.name.startswith("body.") or not self.content_type.startswith(
+                ("body.", "input.")
+            ):
+                raise ValueError("request downloads use a body name and body or input content type")
+            for value in (self.query or {}).values():
+                if not isinstance(value, (str, int, bool)):
+                    raise ValueError("download query values must be scalar")
+                if isinstance(value, str):
+                    rendered = re.sub(r"{{\s*input\.[a-z][a-z0-9_]*\s*}}", "value", value)
+                    if "{" in rendered or "}" in rendered:
+                        raise ValueError("download query supports simple input templates only")
 
     def contract(self) -> dict[str, Any]:
         return {
-            "url": self.url,
+            **({"url": self.url} if self.url is not None else {"path": self.path}),
+            **({"query": dict(self.query or {})} if self.path is not None else {}),
             "hosts": list(self.hosts),
             "name": self.name,
             "content_type": self.content_type,
