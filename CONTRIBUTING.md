@@ -99,6 +99,12 @@ Rules for operations:
 - `download` saves the file a response points to, fetched with the same
   credential from `hosts` only, up to `max_bytes`. Only a fixed operation
   downloads.
+- A content endpoint may use `Download(url=None, path=..., query=...)` after
+  its metadata request. Exactly one of response `url` and same-origin `path` is
+  allowed. Request-path downloads use validated `input` templates, retain the
+  host allowlist, refuse redirects, and check response grants before fetching.
+  `name` is a metadata body path; `content_type` may also be an input path for
+  an export format. This mode requires matching runner support.
 
 ## Grantables
 
