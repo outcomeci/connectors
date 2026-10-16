@@ -446,10 +446,12 @@ class Provider:
 
     `auth` lists the credential kinds the API accepts, in order of preference;
     the credential a workflow binds picks one at run time (see `auth.py`).
+    `base_url` is the API's origin, or None when the workflow supplies it
+    (`base_url_from: workflow` in the contract), as for `custom`.
     """
 
     name: str
-    base_url: str
+    base_url: str | None
     operations: Mapping[str, Operation]
     auth: tuple[Auth, ...] = (Token(),)
     max_requests: int = 50
@@ -488,6 +490,7 @@ class Provider:
             "schema_version": CONTRACT_VERSION,
             "name": self.name,
             "base_url": self.base_url,
+            **({"base_url_from": "workflow"} if self.base_url is None else {}),
             "auth": auth_contract(self.auth),
             "max_requests": self.max_requests,
             "operations": {name: item.contract() for name, item in self.operations.items()},
