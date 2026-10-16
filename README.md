@@ -38,6 +38,7 @@ outcomeci_connectors/
     linkedin.py        # PROVIDER: OAuth with selectable approved app scopes
     x.py               # PROVIDER: recent-post search and user-authorized text publishing
     tavily.py          # PROVIDER: bounded web search, domain grants and credit usage
+    custom.py          # PROVIDER: the workflow's own HTTPS API, static auth, path-prefix grants
 ```
 
 Each provider package owns everything about its provider:
@@ -566,3 +567,38 @@ References: [GraphQL API](https://linear.app/developers/graphql),
 [OAuth](https://linear.app/developers/oauth-2-0-authentication),
 [filtering](https://linear.app/developers/filtering) and
 [webhooks](https://linear.app/developers/webhooks).
+
+## Custom API
+
+`custom` is the escape hatch for a service without a first-party connector.
+The provider fixes no origin: the workflow names it, and the contract carries
+`"base_url": null` with `"base_url_from": "workflow"`.
+
+```yaml
+secrets: {acme: vault:acme/token}
+apis:
+  acme:
+    uses: custom
+    base_url: https://api.acme.com
+    auth: secrets.acme
+steps:
+  - sync:
+      reason: Reconcile open orders.
+      can:
+        - acme.read: {path: /v1/orders}
+        - acme.write: {path: /v1/orders}
+```
+
+Authentication is a static Vault credential only: a `token` (sent as
+`Authorization: Bearer`), an `api_key`, or `basic`. For an api key the header
+comes from the credential's `header_name` (default `X-API-Key`) and optional
+`prefix`; first-party connectors keep their declared header and ignore the
+credential's. No OAuth2, OIDC, JWT or app installation.
+
+`read` sends GET; `write` sends POST, PUT, PATCH or DELETE and runs only in a
+step that grants it. Each takes an optional `path` grant, a prefix the request
+path must sit under; without one, any path on the origin. The runtime keeps
+its usual protections: every request is pinned to `base_url`'s origin, private
+addresses are refused (managed runners always; local runs may opt in with
+`allow_private_network: true`), redirects are not followed, and the agent
+cannot set Authorization, Cookie, Host or Proxy-Authorization.

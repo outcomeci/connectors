@@ -67,7 +67,10 @@ class ApiKey:
     """A static key sent in one header, or in one query parameter.
 
     With a header, the value is `<scheme> <key>` when `scheme` is set, else the
-    bare key. The Vault holds it as an `api_key` credential.
+    bare key. The Vault holds it as an `api_key` credential. With
+    `header_from_credential`, the provider fixes no header: the credential's
+    `header_name` (else `default_header`) and optional `prefix` decide it, for
+    an API the workflow itself names.
     """
 
     kind: ClassVar[str] = "api_key"
@@ -75,14 +78,36 @@ class ApiKey:
     query: str | None = None
     scheme: str | None = None
     description: str = ""
+    header_from_credential: bool = False
+    default_header: str = "X-API-Key"
 
     def __post_init__(self) -> None:
+        if self.header_from_credential:
+            if self.header is not None or self.query is not None or self.scheme is not None:
+                raise ValueError(
+                    "an api key whose header the credential names fixes no header, query or scheme"
+                )
+            if not self.default_header:
+                raise ValueError("an api key read from the credential names a default header")
+            return
         if (self.header is None) == (self.query is None):
             raise ValueError("an api key goes in exactly one of a header or a query parameter")
         if self.scheme is not None and self.header is None:
             raise ValueError("only an api key sent in a header takes a scheme")
 
     def contract(self) -> dict[str, Any]:
+        if self.header_from_credential:
+            # The Vault credential's configuration names the header (`header_name`,
+            # else `default_header`) and an optional `prefix` before the key.
+            return {
+                "kind": self.kind,
+                "description": self.description,
+                "credential": ["api_key"],
+                "header": None,
+                "scheme": None,
+                "header_from": "credential",
+                "default_header": self.default_header,
+            }
         placement = {"header": self.header} if self.header else {"query": self.query}
         return {
             "kind": self.kind,
