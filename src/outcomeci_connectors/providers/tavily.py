@@ -40,6 +40,8 @@ PROVIDER = Provider(
         ApiKey(header="Authorization", scheme="Bearer", description="A Tavily API key."),
     ),
     max_requests=10,
+    # The platform may supply the credential; see README "Tavily search".
+    managed=True,
     operations={
         "search": Operation(
             description=(

@@ -20,6 +20,7 @@ def test_entry_point_and_bearer_api_key_auth():
     registered = {item.name: item.load() for item in entry_points(group="outcomeci.connectors")}
     assert registered["tavily"] is PROVIDER
     contract = PROVIDER.contract()
+    assert contract["managed"] is True
     assert contract["base_url"] == "https://api.tavily.com"
     assert set(contract["operations"]) == {"search"}
     token, api_key = contract["auth"]["accepts"]
