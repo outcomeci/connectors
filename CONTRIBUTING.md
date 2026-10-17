@@ -346,6 +346,19 @@ scopes its operations use, and commands that drive the provider's own CLI.
 Setup code may run subprocesses; `PROVIDER` and everything it references stay
 pure.
 
+## Managed providers
+
+`Provider(managed=True)` marks a provider the platform executes or
+credentials. The contract carries `managed: true` only when set, so an
+unmanaged provider's digest does not move and consumers treat a missing key
+as false. A managed provider that accepts credential kinds (`tavily`) uses the
+workflow's credential when one is bound and the platform's when it is not. A
+managed provider with `base_url=None` is platform-executed: it accepts
+`NoAuth()` alone, carries no `base_url_from`, and its fixed operation's
+`request` is the api's own route, not a broker HTTP call (`media`). Grants on
+a managed provider are static values; the cli rejects an expression, so a new
+managed provider does not document that rule again.
+
 ## Testing
 
 ```

@@ -223,7 +223,7 @@ operation shape with no `request`) is rejected in Complexity Tracking.
 `media.py` module-level data, all plain dicts/lists/strings:
 
 ```python
-MEDIA_TYPES = ("audio", "image", "video", "document")   # FR-018, closed set
+MEDIA_TYPES = ("audio", "image", "video", "document")  # FR-018, closed set
 
 SEGMENT = {
     "type": "object",
@@ -368,7 +368,7 @@ PROVIDER = _MediaProvider(
     auth=(NoAuth(),),
     max_requests=10,
     managed=True,
-    operations={"process": ...},   # D2
+    operations={"process": ...},  # D2
 )
 ```
 
