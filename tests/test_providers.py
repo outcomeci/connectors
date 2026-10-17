@@ -26,7 +26,21 @@ def test_built_in_providers_are_registered_as_entry_points():
 def test_slack_contract_carries_the_first_built_ins():
     contract = slack.PROVIDER.contract()
     assert contract["schema_version"] == CONTRACT_VERSION
-    assert sorted(contract["operations"]) == ["file", "post", "reactions", "thread"]
+    assert sorted(contract["operations"]) == [
+        "channels",
+        "file",
+        "members",
+        "post",
+        "reactions",
+        "thread",
+        "user_by_email",
+        "usergroup_members",
+        "usergroups",
+    ]
+    lookups = {name: contract["operations"][name] for name in ("user_by_email", "members")}
+    assert lookups["user_by_email"]["request"]["path"] == "/api/users.lookupByEmail"
+    assert lookups["user_by_email"]["response"]["expose"]["id"] == "body.user.id"
+    assert lookups["members"]["grantable"] == {"channel": {"field": "channel"}}
     post = contract["operations"]["post"]
     assert post["request"] == {
         "method": "POST",
