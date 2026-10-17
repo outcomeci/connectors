@@ -1,0 +1,144 @@
+"""Execution providers: pure credential contracts, never process or filesystem authority.
+
+HTTP and agent providers share discovery, but only HTTP providers expose operations.
+Runtimes must select the capability before interpreting a provider contract.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
+from .provider import CONTRACT_VERSION
+
+
+@dataclass(frozen=True)
+class AgentProvider:
+    """A coding agent and its credential hydration requirements.
+
+    File paths are relative to an ephemeral provider home. The runtime owns
+    file permissions, environment isolation, execution, cleanup and rotation.
+    """
+
+    name: str
+    label: str
+    credential_secret: str
+    environment_variable: str
+    api_host: str
+    setup_description: str
+    credential_file: str | None = None
+    home_directory: str | None = None
+    isolated_home: bool = False
+    config_files: Mapping[str, str] = field(default_factory=dict)
+    capability: str = field(default="agent", init=False)
+
+    def validate_credentials(self, secrets: Mapping[str, Any]) -> dict[str, Any]:
+        """Return canonical hydration input; errors never include credential values."""
+        if set(secrets) != {self.credential_secret}:
+            raise ValueError(f"{self.name} requires only {self.credential_secret}")
+        value = secrets[self.credential_secret]
+        if self.credential_file:
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError as exc:
+                    raise ValueError(f"{self.name} requires a JSON credential object") from exc
+            if not isinstance(value, dict) or not value:
+                raise ValueError(f"{self.name} requires a non-empty credential object")
+            if value.get("auth_mode") != "chatgpt" or not isinstance(value.get("tokens"), dict):
+                raise ValueError("Codex credential must be a complete ChatGPT auth cache")
+            try:
+                value = json.loads(json.dumps(value, allow_nan=False))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{self.name} requires a JSON credential object") from exc
+        elif not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{self.name} requires a non-empty credential string")
+        return {self.credential_secret: value}
+
+    def contract(self) -> dict[str, Any]:
+        value_schema = (
+            {"type": "string", "minLength": 2, "contentMediaType": "application/json"}
+            if self.credential_file
+            else {"type": "string", "minLength": 1, "pattern": r"\S"}
+        )
+        return {
+            "schema_version": CONTRACT_VERSION,
+            "name": self.name,
+            "label": self.label,
+            "capability": self.capability,
+            "auth": {
+                "accepts": [{"kind": "agent", "provider": self.name}],
+                "credential_type": "agent",
+                "configuration": {"provider": self.name},
+                "secrets_schema": {
+                    "type": "object",
+                    "properties": {self.credential_secret: value_schema},
+                    "required": [self.credential_secret],
+                    "additionalProperties": False,
+                },
+            },
+            "execution": {
+                "adapter": self.name,
+                "credential_secret": self.credential_secret,
+                "environment_variable": self.environment_variable,
+                "api_host": self.api_host,
+                "credential_file": self.credential_file,
+                "home_directory": self.home_directory,
+                "isolated_home": self.isolated_home,
+                "config_files": dict(self.config_files),
+            },
+            "setup": {
+                "description": self.setup_description,
+                "suggested_path": f"agents/{self.name}",
+            },
+        }
+
+    def digest(self) -> str:
+        encoded = json.dumps(self.contract(), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+CODEX = AgentProvider(
+    name="codex",
+    label="Codex",
+    credential_secret="auth_json",
+    environment_variable="CODEX_HOME",
+    api_host="api.openai.com",
+    credential_file="auth.json",
+    home_directory="codex",
+    config_files={"config.toml": 'cli_auth_credentials_store = "file"\n'},
+    setup_description="Upload the auth.json credential object from your Codex login.",
+)
+CLAUDE = AgentProvider(
+    name="claude",
+    label="Claude Code",
+    credential_secret="oauth_token",
+    environment_variable="CLAUDE_CODE_OAUTH_TOKEN",
+    api_host="api.anthropic.com",
+    setup_description="Supply a Claude Code OAuth token generated by claude setup-token.",
+)
+OPENCODE = AgentProvider(
+    name="opencode",
+    label="OpenCode",
+    credential_secret="api_key",
+    environment_variable="OPENROUTER_API_KEY",
+    api_host="openrouter.ai",
+    home_directory="opencode",
+    isolated_home=True,
+    setup_description="Supply an OpenRouter API key for OpenCode.",
+)
+
+
+def agent_providers() -> dict[str, AgentProvider]:
+    """Built-in execution providers, returned separately from HTTP operations."""
+    return {provider.name: provider for provider in (CODEX, CLAUDE, OPENCODE)}
+
+
+def agent_provider(name: str) -> AgentProvider:
+    try:
+        return agent_providers()[name]
+    except KeyError:
+        raise ValueError(f"unknown agent provider: {name}") from None
