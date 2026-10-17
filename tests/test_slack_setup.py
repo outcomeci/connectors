@@ -50,12 +50,17 @@ def test_scaffold_writes_a_manifest_for_the_webhook_trigger(tmp_path: Path) -> N
     assert value["oauth_config"]["scopes"]["bot"] == [
         "app_mentions:read",
         "channels:history",
+        "channels:read",
         "chat:write",
         "files:read",
         "groups:history",
+        "groups:read",
         "im:history",
         "mpim:history",
         "reactions:read",
+        "usergroups:read",
+        "users:read",
+        "users:read.email",
     ]
     assert value["features"]["app_home"]["messages_tab_enabled"] is True
     assert "slash_commands" not in value["features"]
