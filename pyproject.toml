@@ -12,6 +12,9 @@ license = { text = "Apache-2.0" }
 dependencies = []
 
 [project.entry-points."outcomeci.connectors"]
+codex = "outcomeci_connectors.agents:CODEX"
+claude = "outcomeci_connectors.agents:CLAUDE"
+opencode = "outcomeci_connectors.agents:OPENCODE"
 slack = "outcomeci_connectors.providers.slack:PROVIDER"
 "google.drive" = "outcomeci_connectors.providers.google.drive:PROVIDER"
 "google.analytics" = "outcomeci_connectors.providers.google.analytics:PROVIDER"

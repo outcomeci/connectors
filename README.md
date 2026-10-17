@@ -602,3 +602,34 @@ its usual protections: every request is pinned to `base_url`'s origin, private
 addresses are refused (managed runners always; local runs may opt in with
 `allow_private_network: true`), redirects are not followed, and the agent
 cannot set Authorization, Cookie, Host or Proxy-Authorization.
+
+## Coding agents
+
+Codex, Claude Code, and OpenCode are execution-capable connectors. They share
+`outcomeci.connectors` discovery with HTTP providers, but their contracts have
+`capability: agent` and do not expose HTTP operations. Consumers must inspect
+that capability before treating a provider as an HTTP connector. Existing HTTP
+contracts and their digests are unchanged.
+
+```yaml
+secrets:
+  coder: vault:agents/codex
+reasoning:
+  default:
+    agent: codex
+    auth: secrets.coder
+```
+
+`outcomeci_connectors.agents.agent_provider(name)` returns the provider's typed
+metadata; `agent_providers()` lists the built-ins. Agent Vault credentials use
+`credential_type: agent` and `configuration: {provider: codex}`. Their secret
+fields are `auth_json` (a JSON string for Codex), `oauth_token` (Claude Code),
+or `api_key` (OpenCode through OpenRouter). `validate_credentials(secrets)`
+validates these fields and returns canonical runtime input, decoding Codex's
+JSON string to an object. Setup descriptions and schemas are in the contract.
+
+Hydration metadata describes the credential environment variable, isolated
+home, optional credential file, and required configuration files. These are
+pure descriptors: the runtime owns private file creation, environment
+isolation, process launching and cancellation, credential leasing, rotation,
+and cleanup. Installing a connector grants none of those permissions.
