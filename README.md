@@ -39,6 +39,7 @@ outcomeci_connectors/
     x.py               # PROVIDER: recent-post search and user-authorized text publishing
     tavily.py          # PROVIDER: bounded web search, domain grants and credit usage
     custom.py          # PROVIDER: the workflow's own HTTPS API, static auth, path-prefix grants
+    media.py           # PROVIDER: platform-run processing of a trigger attachment; audio → transcript
 ```
 
 Each provider package owns everything about its provider:
@@ -91,6 +92,11 @@ uses the same contract for platform-managed credentials and your own key;
 credential selection, usage attribution and billing are runtime responsibilities.
 It does not select a platform credential or implement billing itself.
 
+`tavily` carries `managed: true` in its contract. The platform may supply its
+credential; with `auth` bound the workflow's own key is used. tavily's digest
+changes in this release because it is now marked managed; no other provider's
+digest changes. Consumers treat a missing `managed` key as false.
+
 Grant `tavily.search` with `topic`, `search_depth`, `include_domains`,
 `exclude_domains` or `max_results` to pin those inputs. Domain grants pin the
 whole list, not an arbitrary subset. Each call requires `query` (1–4000
@@ -120,6 +126,100 @@ crawl or extract. Domain inclusion uses Tavily's default restrictive mode;
 the caller cannot change it to merely prefer the selected domains.
 
 Reference: [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search).
+
+## Media processing
+
+Bind `uses: media` with no `auth`. The provider is platform-managed: its
+contract carries `"managed": true`, `"base_url": null` and no `base_url_from`,
+and `auth.accepts` is `none`. The platform executes every call and meters it;
+the workflow supplies nothing. Supplying `auth` on the binding is a compile
+error.
+
+```yaml
+apis:
+  media: {uses: media}
+# Within an agent step:
+# can:
+#   - media.process: {outputs: [transcript]}
+```
+
+A step names the attachment to process by the attachment id the run's trigger
+payload exposes (email trigger attachments in v1). There is no upload, URL,
+inline bytes or object key, and the caller does not name the media type: the
+input schema closes those fields out. The runner forwards the reference
+unchanged and the api resolves it against the run's trigger event, so an id
+that does not belong to this run's trigger is refused. The media type comes
+from the stored attachment's recorded content type.
+
+```json
+{
+  "attachment": "att_01",
+  "outputs": ["transcript"],
+  "options": {"transcript": {"language": "en-US"}}
+}
+```
+
+`outputs` is a non-empty list of distinct output types from the registry
+below. `options` is keyed by output type and takes that type's options
+schema. The grant `media.process: {outputs: [...]}` pins the whole list, as a
+Tavily domain grant does: the runtime fills it in when the agent omits
+`outputs` and refuses a call whose `outputs` differ. Only `outputs` is
+grantable, and the grant value is a static literal list, as for every managed
+provider; the compiler rejects an expression.
+
+The support registry is media type → output type → payload schema, options
+schema and description. Cells not in the table are absent, not stubbed.
+
+| media_type | output type | payload | options |
+|------------|-------------|---------|---------|
+| audio | transcript | `{text: string, language: string, segments?: [{start: number, end: number, text: string}]}` | `{language?: string}` (BCP-47 hint) |
+
+The contract carries the registry verbatim under a top-level `media.registry`
+key, so the digest covers it and the api validates each call-time result
+against the locked contract rather than against whichever connectors version
+it imports. The cli reads the same key to check requested output types at
+compile time. Adding a cell is a connectors release: the `outputs` enum and
+the registry grow and nothing else in the contract moves.
+
+The response exposes `media_type`, `outputs` keyed by output type, the
+processing backend's `provider` and `model`, `duration_seconds` (present for
+audio and video, absent for media with no duration) and `usage`:
+
+```json
+{
+  "media_type": "audio",
+  "outputs": {"transcript": {"text": "...", "language": "en", "segments": [{"start": 0.0, "end": 2.4, "text": "..."}]}},
+  "provider": "<processing backend>",
+  "model": "<model id>",
+  "duration_seconds": 61.2,
+  "usage": {"minutes": 1.02}
+}
+```
+
+`usage.minutes` is the metering unit for every media type; a backend that
+bills per item reports its minute equivalent. It is present on failed calls
+too, reporting the minutes the backend consumed (zero when none). Missing
+usage is a contract violation, not zero. `outputs` is never partial: a call
+whose processor fails after producing some outputs fails as a whole. The
+module exports `OUTPUT`, the result schema, for the api and tests; it is not
+part of the contract document.
+
+Call-time failures a workflow can see:
+
+| Code | Meaning |
+|------|---------|
+| `integration.attachment_not_found` | `attachment` is not an attachment of the run's trigger event |
+| `integration.media_unsupported` | the attachment's recorded content type is not a registry media type; carries the content type |
+| `integration.output_unsupported` | an output type is registered, but not for this attachment's media type; names both |
+| `integration.options_unused` | `options` carries a key that is not in `outputs` |
+
+For runtimes: on a provider with `managed: true` and `base_url: null`, the
+operation's `request` (`POST /process`, body `{{ input }}`) is not an HTTP
+call the credential broker makes. It names the api's processor route,
+relative to the api's own origin; the runner routes the call there and the
+api answers with the result body that `expose` reads. A consumer that keyed
+on `base_url: null` to mean "the workflow supplies the origin" must key on
+`base_url_from` instead.
 
 ## X search and publishing
 

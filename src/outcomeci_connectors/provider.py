@@ -448,6 +448,11 @@ class Provider:
     the credential a workflow binds picks one at run time (see `auth.py`).
     `base_url` is the API's origin, or None when the workflow supplies it
     (`base_url_from: workflow` in the contract), as for `custom`.
+    `managed`: the platform may supply the credential and, when `base_url`
+    is None, executes the operation itself; emitted on the contract only when
+    true, so unmanaged providers' digests are untouched and consumers treat a
+    missing key as false; a managed provider with `base_url` None carries no
+    `base_url_from`.
     """
 
     name: str
@@ -458,6 +463,7 @@ class Provider:
     watchers: Mapping[str, Watcher] = field(default_factory=dict)
     receiver: Receiver | None = None
     setup_credentials: tuple[SetupCredential, ...] = ()
+    managed: bool = False
 
     def __post_init__(self) -> None:
         check_accepts(self.auth)
@@ -489,8 +495,9 @@ class Provider:
             ),
             "schema_version": CONTRACT_VERSION,
             "name": self.name,
+            **({"managed": True} if self.managed else {}),
             "base_url": self.base_url,
-            **({"base_url_from": "workflow"} if self.base_url is None else {}),
+            **({"base_url_from": "workflow"} if self.base_url is None and not self.managed else {}),
             "auth": auth_contract(self.auth),
             "max_requests": self.max_requests,
             "operations": {name: item.contract() for name, item in self.operations.items()},

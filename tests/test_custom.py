@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from outcomeci_connectors.provider import CONTRACT_VERSION, ApiKey, Operation, Provider, Token
-from outcomeci_connectors.providers import custom, github, slack, tavily
+from outcomeci_connectors.providers import custom, github, media, slack, tavily
 
 
 def test_custom_takes_its_origin_from_the_workflow():
@@ -12,6 +12,7 @@ def test_custom_takes_its_origin_from_the_workflow():
     assert contract["name"] == "custom"
     assert contract["base_url"] is None
     assert contract["base_url_from"] == "workflow"
+    assert "managed" not in contract
     assert contract["max_requests"] == 50
     assert contract["watchers"] == {} and contract["receiver"] is None
 
@@ -42,10 +43,11 @@ def test_custom_read_and_write_are_request_operations_scoped_by_path_prefix():
         assert operation["input"]["required"] == ["method", "path"]
 
 
-def test_a_provider_with_a_fixed_origin_carries_no_base_url_from():
-    for provider in (slack.PROVIDER, github.PROVIDER, tavily.PROVIDER):
+def test_a_provider_with_a_fixed_origin_or_managed_carries_no_base_url_from():
+    for provider in (slack.PROVIDER, github.PROVIDER, tavily.PROVIDER, media.PROVIDER):
         assert "base_url_from" not in provider.contract()
         assert "header_from" not in str(provider.contract()["auth"])
+    assert media.PROVIDER.contract()["base_url"] is None
 
 
 def test_an_api_key_read_from_the_credential_fixes_nothing_else():

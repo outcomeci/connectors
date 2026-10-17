@@ -314,6 +314,20 @@ def test_github_read_and_write_are_unchanged_by_search():
 def test_digest_changes_with_the_contract():
     assert slack.PROVIDER.digest() == slack.PROVIDER.digest()
     assert slack.PROVIDER.digest() != github.PROVIDER.digest()
+    operations = {"get": Operation("g", method="GET", path="/g")}
+    unmanaged = Provider(name="p", base_url="https://p.test", operations=operations)
+    managed = Provider(name="p", base_url="https://p.test", operations=operations, managed=True)
+    assert unmanaged.digest() != managed.digest()
+    assert managed.contract()["managed"] is True
+
+
+def test_managed_absent_when_false():
+    for item in entry_points(group="outcomeci.connectors"):
+        contract = item.load().contract()
+        if item.name in {"tavily", "media"}:
+            assert contract["managed"] is True, item.name
+        else:
+            assert "managed" not in contract, item.name
 
 
 def test_reaction_watcher_matches_the_emoji_only():
