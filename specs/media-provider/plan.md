@@ -12,9 +12,10 @@ contract is the product: a closed input schema `{attachment, outputs,
 options?}`, an exported `OUTPUT` result schema, an exported `REGISTRY`
 (`audio → transcript` only) carried verbatim on the contract under a top-level
 `media.registry` key, and a grant on `outputs` only. Alongside it, `Provider`
-gains `managed: bool = False`, emitted as `managed` on every contract and set
-on `tavily` and `media`, so cli and api dispatch on the flag instead of the
-literal name "tavily". The change lands as one `feat(media)` release of
+gains `managed: bool = False`, emitted as `managed` on a contract only when
+true (omitted when false, exactly as `base_url_from` is omitted when it does
+not apply) and set on `tavily` and `media`, so cli and api dispatch on the flag
+instead of the literal name "tavily". The change lands as one `feat(media)` release of
 `outcomeci-connectors` (v0.15.0 from the current v0.14.0) that the api pins and
 the cli runner image installs.
 
@@ -35,7 +36,8 @@ the cli runner image installs.
 
 **Constraints**: provider modules make no network call and read no environment
 at import; every contract is JSON-serialisable and digest-stable; the only
-digest movement in this release is the `managed` key on existing providers.
+digest movement in this release is the `managed` key on `tavily`; every other
+existing provider's digest is unchanged.
 
 **Scale/Scope**: two source files touched, one created; one new test module,
 two existing test modules extended; README and CONTRIBUTING additions.
@@ -56,7 +58,7 @@ enforceable rules, and its "Review bar" is the gate. Checked against this plan:
 | Auth kinds backed by documentation; `NoAuth()` stands alone | PASS. `auth=(NoAuth(),)`; there is no third-party API to document, which the module docstring says. |
 | Tests cover entry point, operation contract, `auth.accepts` | PASS. See Phase 3. |
 | README layout lists the provider | PASS. "Layout" line plus a "Media processing" section. |
-| A contract change changes the digest, and the PR says what and why | PASS, with a caveat: `managed` moves every provider's digest once. Recorded in README and the PR body (Phase 4). |
+| A contract change changes the digest, and the PR says what and why | PASS. `managed` is emitted only when true, so only `tavily`'s digest moves (and `media` is new); every other provider's digest is unchanged. Recorded in README and the PR body (Phase 4). |
 
 Deviation to record: `Operation` today admits only a fixed shape (`method` +
 `path`) or a request shape (`methods`). `process` is neither in spirit, since
@@ -83,7 +85,7 @@ contract is produced by `PROVIDER.contract()` and asserted by tests.
 
 ```text
 src/outcomeci_connectors/
-├── provider.py                  # MODIFY: Provider.managed, contract() emits it,
+├── provider.py                  # MODIFY: Provider.managed, contract() emits it only when true,
 │                                #   base_url_from suppressed when managed
 └── providers/
     ├── tavily.py                # MODIFY: managed=True
@@ -92,7 +94,7 @@ src/outcomeci_connectors/
 tests/
 ├── test_media.py                # CREATE: contract snapshot, schema cases, registry, growth
 ├── test_tavily.py               # MODIFY: assert managed is True
-├── test_providers.py            # MODIFY: managed defaults False on every other provider
+├── test_providers.py            # MODIFY: managed absent on every other provider
 └── test_custom.py               # MODIFY: base_url_from still emitted for unmanaged custom
 
 pyproject.toml                   # MODIFY: media entry point
@@ -116,12 +118,13 @@ Read before writing code; each one is a trap the spec does not spell out.
 - **F2. `Operation.__post_init__` rejects an operation that is neither fixed nor request.**
   `process` needs `method` + `path` (or `methods`) to construct. Decision D2
   resolves this without a new operation shape.
-- **F3. `managed` moves every digest, not only tavily's.**
-  The key is always present (FR-005 asks for that so consumers never have to
-  default it), so slack, github, google.*, x, linkedin, linear, custom and
-  tavily all re-digest once. SC-005 talks about tavily because tavily is the
-  one whose *value* changes meaning; the README note must say "every
-  provider" so nobody is surprised by a lock refresh on an unrelated workflow.
+- **F3. `managed` moves only tavily's digest (and media is new).**
+  The key is emitted only when true, exactly like `base_url_from` is emitted
+  only when it applies, so slack, github, google.*, x, linkedin, linear and
+  custom keep their digests byte for byte and no non-tavily workflow revision
+  changes. Consumers treat a missing key as false. SC-005 names tavily
+  because it is the one existing provider whose contract changes; the README
+  note says only that.
 - **F4. `check_accepts` already enforces `NoAuth()` alone.** No auth change
   is needed; `auth.accepts` for media is `[{"kind": "none", "credential": []}]`
   exactly as FR-002 wants.
@@ -156,16 +159,23 @@ class Provider:
     managed: bool = False
 ```
 
-`contract()` gains `"managed": self.managed` immediately after `"name"`, and
-the `base_url_from` line becomes:
+`contract()` gains, immediately after `"name"`:
+
+```python
+**({"managed": True} if self.managed else {}),
+```
+
+and the `base_url_from` line becomes:
 
 ```python
 **({"base_url_from": "workflow"} if self.base_url is None and not self.managed else {}),
 ```
 
 Docstring: "`managed`: the platform may supply the credential and, when
-`base_url` is None, executes the operation itself; a managed provider with
-`base_url` None carries no `base_url_from`." No `__post_init__` rule ties
+`base_url` is None, executes the operation itself; emitted on the contract
+only when true, so unmanaged providers' digests are untouched and consumers
+treat a missing key as false; a managed provider with `base_url` None
+carries no `base_url_from`." No `__post_init__` rule ties
 `managed` to a particular auth kind: FR-006 says the combination is a runtime
 decision, and tavily (managed, accepts `token`/`api_key`) proves both
 combinations are valid.
@@ -386,8 +396,8 @@ is never partial.
 
 ## Phase 2: Implementation steps
 
-1. `src/outcomeci_connectors/provider.py`: add `managed`, emit it, make
-   `base_url_from` conditional (D1). Update the `Provider` docstring.
+1. `src/outcomeci_connectors/provider.py`: add `managed`, emit it only when
+   true, make `base_url_from` conditional (D1). Update the `Provider` docstring.
 2. `src/outcomeci_connectors/providers/tavily.py`: `managed=True`.
 3. `src/outcomeci_connectors/providers/media.py`: D3 to D7, in that order so
    each constant is defined before use. Module docstring states that the
@@ -475,16 +485,16 @@ In `test_entry_point_and_bearer_api_key_auth`: `assert contract["managed"] is Tr
 
 ### `tests/test_providers.py` (modify)
 
-- `test_managed_defaults_false_and_is_always_present`: for every registered
-  provider, `isinstance(contract["managed"], bool)`; exactly `{"tavily",
-  "media"}` are `True`.
+- `test_managed_absent_when_false`: for every registered provider other than
+  `tavily` and `media`, `"managed" not in contract`; for `tavily` and
+  `media`, `contract["managed"] is True`.
 - In `test_digest_changes_with_the_contract`: `Provider(...)` with
   `managed=True` digests differently from the same with `managed=False`.
 
 ### `tests/test_custom.py` (modify)
 
 `test_custom_takes_its_origin_from_the_workflow` already asserts
-`base_url_from == "workflow"`; add `assert contract["managed"] is False` so the
+`base_url_from == "workflow"`; add `assert "managed" not in contract` so the
 conditional in D1 is pinned from both sides. Extend
 `test_a_provider_with_a_fixed_origin_carries_no_base_url_from` with the media
 provider, under a renamed test that says "fixed origin or managed".
@@ -517,10 +527,9 @@ provider, under a renamed test that says "fixed origin or managed".
     broker HTTP call.
 - "Tavily search": a paragraph after the first one: "`tavily` carries
   `managed: true` in its contract. The platform may supply its credential;
-  with `auth` bound the workflow's own key is used. Adding the `managed` key
-  changes every provider's contract digest once in this release; workflows
-  locked to a previous contract recompile on upgrade, as for the Slack scope
-  serialization note below."
+  with `auth` bound the workflow's own key is used. tavily's digest changes
+  in this release because it is now marked managed; no other provider's
+  digest changes. Consumers treat a missing `managed` key as false."
 - Nothing in README uses em dashes.
 
 ### CONTRIBUTING.md
@@ -539,8 +548,9 @@ provider does not re-document it).
   bumps v0.14.0 to **v0.15.0**, publishes to PyPI, tags and creates the
   GitHub release with generated notes from the PR title (F6).
 - PR body "What changed and why" paragraph (the review bar asks for it):
-  the new provider; the `managed` key and that **every** provider's digest
-  moves once; `tavily`'s digest also carries the new value; D2's meaning of
+  the new provider; the `managed` key, emitted only when true, so only
+  `tavily`'s digest changes and every other provider's digest and every
+  non-tavily workflow revision is unchanged; D2's meaning of
   `request` on a managed origin-less provider; the four failure codes.
 - Downstream, in order, outside this repo: api pins `outcomeci-connectors==0.15.0`
   and reads `managed` + `media.registry`; cli reads `managed` for the
@@ -569,9 +579,10 @@ Collected here so the caller can forward them unchanged.
 2. **`request` on `media.process` is the api's processor route, not a broker
    call** (`POST /process`, body `{{ input }}`). The runner must route by
    `managed && base_url is null`, never by the operation's `request`.
-3. **Every provider's digest changes once** (new always-present `managed`
-   key), not only tavily's. Expect lock refreshes across all workflows on
-   this connectors version.
+3. **Only tavily's digest changes** (the `managed` key is emitted only when
+   true). Every other provider's digest and every non-tavily workflow
+   revision is unchanged on this connectors version. Consumers treat a
+   missing `managed` key as false.
 4. **`integration.options_unused` is the api's job.** The input schema
    accepts options keyed by an output type that is not in `outputs` (spec
    edge case). If the caller would rather have the schema reject it, that is

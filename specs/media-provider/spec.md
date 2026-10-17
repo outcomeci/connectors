@@ -91,11 +91,11 @@ The cli compiler and the api's call path read `managed: true` from a provider co
 
 **Why this priority**: Adding `media` would otherwise add a second hard-coded name in three repos. The flag is small and pays for itself on the second managed provider.
 
-**Independent Test**: `tavily.PROVIDER.contract()["managed"] is True`, `media.PROVIDER.contract()["managed"] is True`, `slack.PROVIDER.contract()["managed"] is False`; the tavily digest changes with this release and the README says so.
+**Independent Test**: `tavily.PROVIDER.contract()["managed"] is True`, `media.PROVIDER.contract()["managed"] is True`, `"managed" not in slack.PROVIDER.contract()`; the tavily digest changes with this release and the README says so.
 
 **Acceptance Scenarios**:
 
-1. **Given** any provider contract, **When** read by a consumer, **Then** `managed` is present and boolean.
+1. **Given** any provider contract, **When** read by a consumer, **Then** `managed` is either absent (treated as false) or `true`.
 2. **Given** `managed: true` and `auth.accepts` of `[{kind: none}]`, **When** a workflow supplies `auth` for the binding, **Then** compile fails with a message that the provider is platform-managed and takes no credential.
 3. **Given** `managed: true` and `auth.accepts` listing `token` (tavily), **When** a workflow supplies `auth`, **Then** the workflow's own credential is used, as today.
 
@@ -138,7 +138,7 @@ A maintainer adds `video → transcript` or `image → caption` by adding a regi
 - **FR-002**: `media` MUST declare `auth=(NoAuth(),)`, so the contract's `auth.accepts` is `[{"kind": "none", "credential": []}]`. A workflow binding `uses: media` MUST NOT supply `auth`; consumers reject it on the `kind: none` + `managed: true` combination (FR-006).
 - **FR-003**: `media` MUST declare `base_url=None`, and its contract MUST NOT carry `base_url_from`. `managed: true` (FR-005) is the sole signal that the platform executes the operation; no new `base_url_from` value and no separate `execution` key is introduced. A runtime that sees `managed: true` with no `base_url` routes the call to the api's processor path instead of the broker's HTTP path.
 - **FR-004**: `media` MUST expose exactly one operation, `process`, with `side_effect: "execute"` and `max_requests` of 10 (the same bound as tavily).
-- **FR-005**: `Provider` MUST gain a `managed: bool = False` field, emitted in every contract as `managed`. `tavily` and `media` set it to `True`. This changes every provider's digest once (the key is always present) and the tavily README section MUST note that workflows locked to the previous contract recompile on upgrade, as the Slack scope-serialization note does today.
+- **FR-005**: `Provider` MUST gain a `managed: bool = False` field, emitted on the contract as `managed` only when true (omitted when false, as `base_url_from` is omitted when it does not apply). `tavily` and `media` set it to `True`. Only `tavily`'s digest changes (and `media` is new); every other provider's digest is unchanged. Consumers treat a missing key as false. The tavily README section MUST note that tavily's digest changes in this release because it is now marked managed.
 - **FR-006**: A `managed` provider that accepts `none` is platform-only: the platform supplies execution and metering and the workflow supplies nothing. A `managed` provider that accepts credential kinds (tavily) uses the workflow's credential when one is bound and the platform's when it is not. The contract states no more than the flag and the accepted kinds; the choice is a runtime responsibility, as the README already says for tavily.
 
 **Operation input**
@@ -193,7 +193,7 @@ A maintainer adds `video → transcript` or `image → caption` by adding a regi
 - **SC-002**: The example input and output in Contract C1 validate against the shipped schemas, and every invalid example in Edge Cases that the schema can express is rejected, in the test suite.
 - **SC-003**: Adding a registry cell in a test changes the contract only in `outputs.items.enum`, `options.properties` and `media.registry`; no other key of any provider's contract moves.
 - **SC-004**: `grep -rn '"tavily"'` in cli and api dispatch code can be replaced by a `managed` check once this release is pinned; no consumer needs the string "media".
-- **SC-005**: `tavily`'s digest changes exactly once in this release (the `managed` key) and the README records why.
+- **SC-005**: `tavily`'s digest changes exactly once in this release (the `managed` key), no other existing provider's digest changes, and the README records why.
 
 ## Assumptions
 
